@@ -1,5 +1,6 @@
 use eframe::egui;
 use log::info;
+use std::collections::HashMap;
 use std::time::Instant;
 
 mod search;
@@ -26,9 +27,10 @@ struct VisGrepApp {
 
     // UI state
     results_filter: String,
-    expand_all: bool,
+    collapsing_state: HashMap<usize, bool>,
     last_search_time: Instant,
     pending_search: bool,
+    preview_scroll_offset: f32,
 }
 
 impl Default for VisGrepApp {
@@ -53,9 +55,10 @@ impl Default for VisGrepApp {
             searching: false,
 
             results_filter: String::new(),
-            expand_all: true,
+            collapsing_state: HashMap::new(),
             last_search_time: Instant::now(),
             pending_search: false,
+            preview_scroll_offset: 0.0,
         }
     }
 }
@@ -84,6 +87,12 @@ impl VisGrepApp {
         self.searching = false;
         self.selected_result = None;
         self.last_search_time = Instant::now();
+
+        // Initialize all headers as expanded for new search
+        self.collapsing_state.clear();
+        for i in 0..self.results.len() {
+            self.collapsing_state.insert(i, true);
+        }
     }
 }
 
@@ -188,10 +197,18 @@ impl eframe::App for VisGrepApp {
                     ui.separator();
 
                     if ui.button("Expand All").clicked() {
-                        self.expand_all = true;
+                        info!("Expand All clicked - expanding {} results", self.results.len());
+                        for i in 0..self.results.len() {
+                            self.collapsing_state.insert(i, true);
+                        }
+                        info!("Collapsing state: {:?}", self.collapsing_state);
                     }
                     if ui.button("Collapse All").clicked() {
-                        self.expand_all = false;
+                        info!("Collapse All clicked - collapsing {} results", self.results.len());
+                        for i in 0..self.results.len() {
+                            self.collapsing_state.insert(i, false);
+                        }
+                        info!("Collapsing state: {:?}", self.collapsing_state);
                     }
                 });
                 ui.separator();
@@ -200,9 +217,11 @@ impl eframe::App for VisGrepApp {
             // Split view: results on top, preview on bottom
             let available_height = ui.available_height();
 
-            // Results panel
+            // Results panel (50% of available height)
             egui::ScrollArea::vertical()
+                .id_source("results_scroll") // Give it a unique ID
                 .max_height(available_height * 0.5)
+                .auto_shrink([false, false])
                 .show(ui, |ui| {
                     if self.searching {
                         ui.label("Searching...");
@@ -215,10 +234,16 @@ impl eframe::App for VisGrepApp {
 
             ui.separator();
 
-            // Preview panel
+            // Preview panel (take remaining space)
             ui.heading("Preview");
+            let remaining_height = ui.available_height();
+
+            // Use stored scroll offset
             egui::ScrollArea::vertical()
-                .max_height(available_height * 0.4)
+                .id_source("preview_scroll") // Give it a unique ID
+                .max_height(remaining_height)
+                .auto_shrink([false, false])
+                .scroll_offset(egui::Vec2::new(0.0, self.preview_scroll_offset))
                 .show(ui, |ui| {
                     self.render_preview(ui);
                 });
@@ -240,11 +265,25 @@ impl VisGrepApp {
                 continue;
             }
 
+            // Get current open state, default to true if not set
+            let is_open = *self.collapsing_state.get(&file_idx).unwrap_or(&true);
+
             let header_id = ui.make_persistent_id(format!("header_{}", file_idx));
-            egui::CollapsingHeader::new(format!("{} ({} matches)", file_name, result.matches.len()))
-                .id_source(header_id)
-                .default_open(self.expand_all)
-                .show(ui, |ui| {
+
+            // Use CollapsingState to control open/close state
+            let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+                ui.ctx(),
+                header_id,
+                is_open,
+            );
+            state.set_open(is_open);
+            state.store(ui.ctx());
+
+            state
+                .show_header(ui, |ui| {
+                    ui.label(format!("{} ({} matches)", file_name, result.matches.len()));
+                })
+                .body(|ui| {
                     for (match_idx, m) in result.matches.iter().enumerate() {
                         let result_id = file_idx * 10000 + match_idx;
                         let is_selected = self.selected_result == Some(result_id);
@@ -254,6 +293,20 @@ impl VisGrepApp {
                         if ui.selectable_label(is_selected, label).clicked() {
                             self.selected_result = Some(result_id);
                             self.preview.load_file(&result.file_path, m.line_number);
+
+                            // Calculate scroll offset to center the target line in viewport
+                            // The target line should be at index ~50 in the preview (we load 50 lines before/after)
+                            if let Some(target_line_idx) = self.preview.target_line_in_preview {
+                                // Measure actual line height from egui's TextEdit
+                                let line_height = 14.0; // egui code editor default line height
+                                // We want the target line in the middle of viewport
+                                // Show about 10 lines above it
+                                let lines_above_target = 10;
+                                let scroll_to_line = target_line_idx.saturating_sub(lines_above_target);
+                                self.preview_scroll_offset = scroll_to_line as f32 * line_height;
+                                info!("Result clicked: file line {}, preview line index {}, scroll to line {} (show {} lines above), offset {}px, line_height={}",
+                                      m.line_number, target_line_idx, scroll_to_line, lines_above_target, self.preview_scroll_offset, line_height);
+                            }
                         }
                     }
                 });
@@ -262,10 +315,12 @@ impl VisGrepApp {
 
     fn render_preview(&mut self, ui: &mut egui::Ui) {
         if let Some(preview_text) = &self.preview.content {
+            // Use monospaced font and fill available space
             ui.add(
                 egui::TextEdit::multiline(&mut preview_text.as_str())
                     .code_editor()
                     .desired_width(f32::INFINITY)
+                    .desired_rows(100) // Request many rows to fill space
             );
         } else {
             ui.label("Select a result to preview");
