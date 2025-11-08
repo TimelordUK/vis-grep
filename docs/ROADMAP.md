@@ -139,19 +139,26 @@ Save complete search configurations:
 
 ---
 
-### 8. Follow Mode (Live Tail)
-**Priority**: Low
+### 8. Follow Mode (Live Tail) 🔥
+**Priority**: High
 **Complexity**: High
 
-Watch files for new matches in real-time:
-- Like `tail -f | grep`
-- Auto-scroll to new matches
-- Notification on new match
-- Pause/resume toggle
+Watch multiple files for new content in real-time:
+- Like `tail -f` but for multiple files simultaneously
+- Activity indicators showing which files are active
+- Built-in filtering on live output
+- Reliable on Windows network shares (use file size, not mtime)
+- Separate "Tail Mode" tab to avoid UI clutter
 
-**Use case**: Monitoring live log files
+**Use case**:
+- Monitor 20 FIX session logs simultaneously
+- See which sessions have activity
+- Filter live output for errors or specific patterns
+- Better than BareTail + integrated with grep
 
-**Challenges**: File watching, performance, UI updates
+**Implementation**: File size-based detection (reliable on SMB), polling every 250ms
+
+**Design Doc**: See docs/TAIL_MODE_DESIGN.md for detailed design
 
 ---
 
