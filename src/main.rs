@@ -171,10 +171,22 @@ impl eframe::App for VisGrepApp {
             ui.separator();
 
             // Main content area - results and preview
-            let available_height = ui.available_height() - 30.0; // Reserve space for status
+            let available_height = ui.available_height();
 
             // Results panel (40% of available height)
-            self.render_results(ui);
+            egui::ScrollArea::vertical()
+                .id_source("results_scroll")
+                .max_height(available_height * 0.4)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    if self.searching {
+                        ui.label("Searching...");
+                    } else if self.results.is_empty() && !self.search_query.is_empty() {
+                        ui.label("No results found");
+                    } else {
+                        self.render_results(ui);
+                    }
+                });
 
             ui.separator();
 
