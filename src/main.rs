@@ -93,9 +93,9 @@ impl Default for VisGrepApp {
 impl VisGrepApp {
     /// Expand ~ to home directory
     fn expand_tilde(path: &str) -> String {
-        if path.starts_with("~/") {
+        if let Some(stripped) = path.strip_prefix("~/") {
             if let Some(home) = std::env::var_os("HOME") {
-                return format!("{}/{}", home.to_string_lossy(), &path[2..]);
+                return format!("{}/{}", home.to_string_lossy(), stripped);
             }
         }
         path.to_string()
@@ -194,7 +194,7 @@ impl eframe::App for VisGrepApp {
 
             // Results panel (40% of available height)
             egui::ScrollArea::vertical()
-                .id_source("results_scroll")
+                .id_salt("results_scroll")
                 .max_height(available_height * 0.4)
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
@@ -226,7 +226,7 @@ impl eframe::App for VisGrepApp {
             let remaining_height = ui.available_height();
 
             let mut scroll_area = egui::ScrollArea::vertical()
-                .id_source("preview_scroll")
+                .id_salt("preview_scroll")
                 .max_height(remaining_height)
                 .auto_shrink([false, false]);
 
@@ -249,12 +249,10 @@ impl eframe::App for VisGrepApp {
         // Debounced search handling
         if self.pending_search
             && self.last_search_time.elapsed() > std::time::Duration::from_millis(500)
-        {
-            if !self.search_query.is_empty() {
+            && !self.search_query.is_empty() {
                 self.perform_search();
                 self.pending_search = false;
             }
-        }
 
         ctx.request_repaint();
     }
@@ -264,7 +262,7 @@ impl VisGrepApp {
     fn select_match(
         &mut self,
         result_id: usize,
-        file_path: &std::path::PathBuf,
+        file_path: &std::path::Path,
         line_number: usize,
     ) {
         self.selected_result = Some(result_id);
@@ -285,7 +283,7 @@ impl VisGrepApp {
     fn select_match_with_keyboard(
         &mut self,
         result_id: usize,
-        file_path: &std::path::PathBuf,
+        file_path: &std::path::Path,
         line_number: usize,
     ) {
         self.select_match(result_id, file_path, line_number);
@@ -302,8 +300,8 @@ impl VisGrepApp {
         let current_match_idx = current_id % 10000;
 
         // Try next match in current file
-        if current_file_idx < self.results.len() {
-            if current_match_idx + 1 < self.results[current_file_idx].matches.len() {
+        if current_file_idx < self.results.len()
+            && current_match_idx + 1 < self.results[current_file_idx].matches.len() {
                 let next_id = current_file_idx * 10000 + current_match_idx + 1;
                 let file_path = self.results[current_file_idx].file_path.clone();
                 let line_number =
@@ -311,7 +309,6 @@ impl VisGrepApp {
                 self.select_match_with_keyboard(next_id, &file_path, line_number);
                 return;
             }
-        }
 
         // Move to first match in next file
         for file_idx in (current_file_idx + 1)..self.results.len() {
@@ -457,7 +454,7 @@ impl VisGrepApp {
                 for arg in args {
                     cmd.arg(arg);
                 }
-                cmd.arg(&file_path.to_string_lossy().to_string());
+                cmd.arg(file_path.to_string_lossy().to_string());
 
                 if cmd.spawn().is_ok() {
                     info!("Opened file with {}: {:?}", manager, file_path);
@@ -469,7 +466,7 @@ impl VisGrepApp {
             if !opened {
                 // Fallback: just open the parent directory
                 if let Err(e) = std::process::Command::new("xdg-open")
-                    .arg(&parent_dir.to_string_lossy().to_string())
+                    .arg(parent_dir.to_string_lossy().to_string())
                     .spawn()
                 {
                     info!("Failed to open file manager: {}", e);
@@ -1045,11 +1042,10 @@ impl VisGrepApp {
                 self.last_search_time = Instant::now();
             }
 
-            if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                if !self.search_query.is_empty() {
+            if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                && !self.search_query.is_empty() {
                     self.perform_search();
                 }
-            }
 
             ui.checkbox(&mut self.case_sensitive, "Case Sensitive");
             ui.checkbox(&mut self.use_regex, "Regex");
@@ -1077,7 +1073,7 @@ impl VisGrepApp {
                     } else {
                         pattern.category.clone()
                     };
-                    by_category.entry(cat).or_insert_with(Vec::new).push(pattern);
+                    by_category.entry(cat).or_default().push(pattern);
                 }
 
                 let mut categories: Vec<_> = by_category.keys().collect();
@@ -1094,7 +1090,7 @@ impl VisGrepApp {
                             let label = if pattern.description.is_empty() {
                                 pattern.name.clone()
                             } else {
-                                format!("{}", pattern.name)
+                                pattern.name.to_string()
                             };
 
                             let mut button = ui.selectable_label(false, label);
@@ -1129,7 +1125,7 @@ impl VisGrepApp {
                 ui.add(
                     egui::DragValue::new(&mut hours)
                         .speed(1.0)
-                        .clamp_range(1..=8760),
+                        .range(1..=8760),
                 );
                 ui.label("hours");
                 self.file_age_hours = Some(hours);

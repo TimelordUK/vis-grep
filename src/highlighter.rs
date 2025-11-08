@@ -23,7 +23,7 @@ impl SyntaxHighlighter {
                 ext,
                 "rs" | "toml" | "js" | "ts" | "tsx" | "jsx" | "py" | "java" | "c" | "cpp" | "h" | "hpp"
                     | "go" | "rb" | "php" | "cs" | "swift" | "kt" | "scala" | "sh" | "bash" | "json"
-                    | "xml" | "html" | "css" | "md" | "yaml" | "yml" | "sql"
+                    | "xml" | "html" | "css" | "md" | "yaml" | "yml" | "sql" | "lua"
             )
         } else {
             false
