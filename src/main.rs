@@ -38,15 +38,21 @@ struct VisGrepApp {
     scroll_to_selected_result: bool, // Flag to scroll results panel to selected item
 
     input_handler: InputHandler,
+    marks: HashMap<char, usize>, // Store marks (a-z) -> result_id
+
+    // FIX message highlighting pattern
+    fix_highlight_pattern: String,
 }
 
 impl Default for VisGrepApp {
     fn default() -> Self {
         Self {
-            search_path: std::env::current_dir()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string(),
+            search_path: Self::expand_tilde(
+                std::env::current_dir()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .as_ref()
+            ),
             file_pattern: String::from("*.log"),
             search_query: String::new(),
             case_sensitive: false,
@@ -70,21 +76,37 @@ impl Default for VisGrepApp {
             scroll_to_selected_result: false,
 
             input_handler: InputHandler::new(),
+            marks: HashMap::new(),
+
+            fix_highlight_pattern: String::new(),
         }
     }
 }
 
 impl VisGrepApp {
+    /// Expand ~ to home directory
+    fn expand_tilde(path: &str) -> String {
+        if path.starts_with("~/") {
+            if let Some(home) = std::env::var_os("HOME") {
+                return format!("{}/{}", home.to_string_lossy(), &path[2..]);
+            }
+        }
+        path.to_string()
+    }
+
     fn perform_search(&mut self) {
+        // Expand tilde in search path
+        let expanded_path = Self::expand_tilde(&self.search_path);
+
         info!(
             "Starting search: path='{}', pattern='{}', query='{}', file_age={:?}hrs",
-            &self.search_path, &self.file_pattern, &self.search_query, &self.file_age_hours
+            &expanded_path, &self.file_pattern, &self.search_query, &self.file_age_hours
         );
         self.searching = true;
         self.pending_search = false;
         let start = Instant::now();
         self.results = self.search_engine.search(
-            &self.search_path,
+            &expanded_path,
             &self.file_pattern,
             &self.search_query,
             self.case_sensitive,
@@ -122,14 +144,49 @@ impl eframe::App for VisGrepApp {
             ui.horizontal(|ui| {
                 ui.heading("VisGrep - Fast Search Tool");
 
-                // Show pending input state (e.g., "3" or "g")
-                let status = self.input_handler.get_status();
-                if !status.is_empty() {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Show pending input state (e.g., "3" or "g")
+                    let status = self.input_handler.get_status();
+                    if !status.is_empty() {
                         ui.label(format!("Command: {}", status));
-                    });
+                    }
+
+                    // Show active marks
+                    if !self.marks.is_empty() {
+                        let marks_str: String = self.marks.keys().collect();
+                        ui.label(format!("Marks: {}", marks_str));
+                    }
+                });
+            });
+            ui.separator();
+
+            // FIX tag highlighting pattern
+            ui.horizontal(|ui| {
+                ui.label("Highlight pattern in Matched Line (e.g., 150= or fn):");
+                let response = ui.add(egui::TextEdit::singleline(&mut self.fix_highlight_pattern).desired_width(150.0).hint_text("uses search query if empty"));
+
+                // Show active indicator
+                let active_pattern = if !self.fix_highlight_pattern.is_empty() {
+                    &self.fix_highlight_pattern
+                } else {
+                    &self.search_query
+                };
+
+                if !active_pattern.is_empty() {
+                    ui.label(egui::RichText::new(format!("✓ Active: '{}'", active_pattern))
+                        .color(egui::Color32::from_rgb(100, 255, 100)));
+                }
+
+                if ui.small_button("Clear").clicked() {
+                    self.fix_highlight_pattern.clear();
+                }
+
+                // Log when pattern changes
+                if response.changed() {
+                    info!("Highlight pattern changed to: '{}'", self.fix_highlight_pattern);
                 }
             });
+
             ui.separator();
 
             // Search parameters
@@ -274,13 +331,13 @@ impl eframe::App for VisGrepApp {
                 ui.separator();
             }
 
-            // Split view: results on top, preview on bottom
+            // Split view: results, matched line focus, and preview
             let available_height = ui.available_height();
 
-            // Results panel (50% of available height)
+            // Results panel (40% of available height)
             egui::ScrollArea::vertical()
                 .id_source("results_scroll") // Give it a unique ID
-                .max_height(available_height * 0.5)
+                .max_height(available_height * 0.4)
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     if self.searching {
@@ -290,6 +347,17 @@ impl eframe::App for VisGrepApp {
                     } else {
                         self.render_results(ui);
                     }
+                });
+
+            ui.separator();
+
+            // Matched Line Focus Panel
+            ui.label("Matched Line:");
+            egui::Frame::none()
+                .fill(egui::Color32::from_rgb(40, 40, 50))
+                .inner_margin(egui::Margin::same(8.0))
+                .show(ui, |ui| {
+                    self.render_matched_line_focus(ui);
                 });
 
             ui.separator();
@@ -469,6 +537,35 @@ impl VisGrepApp {
             }
             NavigationCommand::YankMatchedLine => self.yank_matched_line(),
             NavigationCommand::OpenInExplorer => self.open_in_explorer(),
+            NavigationCommand::SetMark(ch) => self.set_mark(ch),
+            NavigationCommand::GotoMark(ch) => self.goto_mark(ch),
+        }
+    }
+
+    fn set_mark(&mut self, ch: char) {
+        if let Some(result_id) = self.selected_result {
+            self.marks.insert(ch, result_id);
+            info!("Set mark '{}' at result {}", ch, result_id);
+        } else {
+            info!("No result selected to mark");
+        }
+    }
+
+    fn goto_mark(&mut self, ch: char) {
+        if let Some(&result_id) = self.marks.get(&ch) {
+            let file_idx = result_id / 10000;
+            let match_idx = result_id % 10000;
+
+            if file_idx < self.results.len() && match_idx < self.results[file_idx].matches.len() {
+                let file_path = self.results[file_idx].file_path.clone();
+                let line_number = self.results[file_idx].matches[match_idx].line_number;
+                self.select_match_with_keyboard(result_id, &file_path, line_number);
+                info!("Jumped to mark '{}'", ch);
+            } else {
+                info!("Mark '{}' points to invalid result", ch);
+            }
+        } else {
+            info!("Mark '{}' not set", ch);
         }
     }
 
@@ -868,16 +965,102 @@ impl VisGrepApp {
                 );
             } else {
                 // Plain text for non-code files
-                ui.add(
-                    egui::TextEdit::multiline(&mut preview_text.as_str())
-                        .code_editor()
-                        .desired_width(f32::INFINITY)
-                        .desired_rows(100),
-                );
+                // Always use custom rendering to highlight matched line
+                self.render_preview_with_highlights(ui, preview_text);
             }
         } else {
             ui.label("Select a result to preview");
         }
+    }
+
+    fn render_matched_line_focus(&self, ui: &mut egui::Ui) {
+        use egui::{Color32, RichText};
+
+        if let Some(matched_line) = &self.preview.matched_line_text {
+            ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
+
+            let highlight_color = Color32::from_rgb(255, 200, 100); // Orange/yellow
+            let highlight_bg = Color32::from_rgb(80, 60, 40); // Brown background
+
+            // Use highlight pattern if specified, otherwise use search query
+            let pattern_to_use = if !self.fix_highlight_pattern.is_empty() {
+                &self.fix_highlight_pattern
+            } else {
+                &self.search_query
+            };
+
+            let has_pattern = !pattern_to_use.is_empty();
+
+            info!("Rendering matched line. Pattern: '{}', Has pattern: {}, Line: '{}'",
+                  pattern_to_use, has_pattern, matched_line);
+
+            if has_pattern && matched_line.contains(pattern_to_use) {
+                // Render with highlighted pattern
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+
+                    let parts: Vec<&str> = matched_line.split(pattern_to_use).collect();
+
+                    // Debug: log what we're splitting
+                    info!("Highlighting pattern '{}' in line: {}", pattern_to_use, matched_line);
+                    info!("Split into {} parts", parts.len());
+
+                    for (i, part) in parts.iter().enumerate() {
+                        if !part.is_empty() {
+                            ui.label(*part);
+                        }
+
+                        // Add highlighted pattern between parts (except after last part)
+                        if i < parts.len() - 1 {
+                            ui.label(RichText::new(pattern_to_use)
+                                .color(highlight_color)
+                                .background_color(highlight_bg)
+                                .strong());
+                        }
+                    }
+                });
+            } else {
+                // Just show the line normally
+                if has_pattern {
+                    info!("Pattern '{}' not found in line: {}", pattern_to_use, matched_line);
+                }
+                ui.label(matched_line);
+            }
+        } else {
+            ui.label(RichText::new("Select a match to see the line here")
+                .italics()
+                .color(Color32::GRAY));
+        }
+    }
+
+    fn render_preview_with_highlights(&self, ui: &mut egui::Ui, text: &str) {
+        use egui::Color32;
+
+        egui::ScrollArea::neither()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
+
+                let match_line_bg = Color32::from_rgb(60, 60, 80); // Subtle blue-gray for matched line
+
+                for line in text.lines() {
+                    let is_match_line = line.starts_with(">>>");
+
+                    // Apply background color for matched line
+                    if is_match_line {
+                        let frame = egui::Frame::none()
+                            .fill(match_line_bg)
+                            .inner_margin(egui::Margin::symmetric(4.0, 2.0));
+
+                        frame.show(ui, |ui| {
+                            ui.label(line);
+                        });
+                    } else {
+                        // Regular line
+                        ui.label(line);
+                    }
+                }
+            });
     }
 
     fn should_highlight_file(&self, path: &std::path::Path) -> bool {

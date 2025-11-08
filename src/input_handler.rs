@@ -23,12 +23,18 @@ pub enum NavigationCommand {
 
     // File operations
     OpenInExplorer, // gf - open file in explorer/finder
+
+    // Bookmarks/Markers
+    SetMark(char),  // ma, mb, etc - set a mark
+    GotoMark(char), // 'a, 'b, etc - go to a mark
 }
 
 pub struct InputHandler {
     // State for building up multi-key commands (like "gg" or "3n")
     pending_keys: String,
     count_buffer: String,
+    waiting_for_mark_char: bool,       // True when waiting for 'a' in 'ma'
+    waiting_for_goto_mark_char: bool,  // True when waiting for 'a' in "'a"
 }
 
 impl InputHandler {
@@ -36,6 +42,8 @@ impl InputHandler {
         Self {
             pending_keys: String::new(),
             count_buffer: String::new(),
+            waiting_for_mark_char: false,
+            waiting_for_goto_mark_char: false,
         }
     }
 
@@ -210,6 +218,41 @@ impl InputHandler {
                     info!("Ignoring standalone 'f'");
                 }
             }
+            // 'm' - start mark sequence (ma, mb, etc)
+            else if i.key_pressed(egui::Key::M)
+                && !i.modifiers.ctrl
+                && !i.modifiers.alt
+                && !i.modifiers.shift
+            {
+                self.waiting_for_mark_char = true;
+                self.pending_keys = "m".to_string();
+                info!("Pending: m (waiting for mark letter)");
+            }
+            // "'" (apostrophe/quote) - start goto mark sequence ('a, 'b, etc)
+            else if i.key_pressed(egui::Key::Quote)
+                && !i.modifiers.ctrl
+                && !i.modifiers.alt
+                && !i.modifiers.shift
+            {
+                self.waiting_for_goto_mark_char = true;
+                self.pending_keys = "'".to_string();
+                info!("Pending: ' (waiting for mark letter)");
+            }
+            // Letter keys - could be mark character
+            else if self.waiting_for_mark_char || self.waiting_for_goto_mark_char {
+                // Check for any letter a-z
+                let mark_char = Self::get_letter_from_key(i);
+                if let Some(ch) = mark_char {
+                    if self.waiting_for_mark_char {
+                        info!("Command: m{} (set mark)", ch);
+                        command = Some(NavigationCommand::SetMark(ch));
+                    } else {
+                        info!("Command: '{} (goto mark)", ch);
+                        command = Some(NavigationCommand::GotoMark(ch));
+                    }
+                    self.reset();
+                }
+            }
             // Escape to cancel pending commands
             else if i.key_pressed(egui::Key::Escape) {
                 if !self.pending_keys.is_empty() || !self.count_buffer.is_empty() {
@@ -225,6 +268,8 @@ impl InputHandler {
     fn reset(&mut self) {
         self.pending_keys.clear();
         self.count_buffer.clear();
+        self.waiting_for_mark_char = false;
+        self.waiting_for_goto_mark_char = false;
     }
 
     /// Get the current pending input state for display (e.g., "3" or "g")
@@ -234,5 +279,25 @@ impl InputHandler {
         } else {
             String::new()
         }
+    }
+
+    /// Try to extract a letter (a-z) from the current key press
+    fn get_letter_from_key(input: &egui::InputState) -> Option<char> {
+        for (key, ch) in &[
+            (egui::Key::A, 'a'), (egui::Key::B, 'b'), (egui::Key::C, 'c'),
+            (egui::Key::D, 'd'), (egui::Key::E, 'e'), (egui::Key::F, 'f'),
+            (egui::Key::G, 'g'), (egui::Key::H, 'h'), (egui::Key::I, 'i'),
+            (egui::Key::J, 'j'), (egui::Key::K, 'k'), (egui::Key::L, 'l'),
+            (egui::Key::M, 'm'), (egui::Key::N, 'n'), (egui::Key::O, 'o'),
+            (egui::Key::P, 'p'), (egui::Key::Q, 'q'), (egui::Key::R, 'r'),
+            (egui::Key::S, 's'), (egui::Key::T, 't'), (egui::Key::U, 'u'),
+            (egui::Key::V, 'v'), (egui::Key::W, 'w'), (egui::Key::X, 'x'),
+            (egui::Key::Y, 'y'), (egui::Key::Z, 'z'),
+        ] {
+            if input.key_pressed(*key) && !input.modifiers.ctrl && !input.modifiers.alt && !input.modifiers.shift {
+                return Some(*ch);
+            }
+        }
+        None
     }
 }
