@@ -96,8 +96,7 @@ impl Config {
             let yaml = serde_yaml::to_string(self)
                 .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-            fs::write(&path, yaml)
-                .map_err(|e| format!("Failed to write config file: {}", e))?;
+            fs::write(&path, yaml).map_err(|e| format!("Failed to write config file: {}", e))?;
 
             info!("Saved config to {:?}", path);
             Ok(())

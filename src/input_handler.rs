@@ -33,8 +33,8 @@ pub struct InputHandler {
     // State for building up multi-key commands (like "gg" or "3n")
     pending_keys: String,
     count_buffer: String,
-    waiting_for_mark_char: bool,       // True when waiting for 'a' in 'ma'
-    waiting_for_goto_mark_char: bool,  // True when waiting for 'a' in "'a"
+    waiting_for_mark_char: bool,      // True when waiting for 'a' in 'ma'
+    waiting_for_goto_mark_char: bool, // True when waiting for 'a' in "'a"
 }
 
 impl InputHandler {
@@ -284,17 +284,38 @@ impl InputHandler {
     /// Try to extract a letter (a-z) from the current key press
     fn get_letter_from_key(input: &egui::InputState) -> Option<char> {
         for (key, ch) in &[
-            (egui::Key::A, 'a'), (egui::Key::B, 'b'), (egui::Key::C, 'c'),
-            (egui::Key::D, 'd'), (egui::Key::E, 'e'), (egui::Key::F, 'f'),
-            (egui::Key::G, 'g'), (egui::Key::H, 'h'), (egui::Key::I, 'i'),
-            (egui::Key::J, 'j'), (egui::Key::K, 'k'), (egui::Key::L, 'l'),
-            (egui::Key::M, 'm'), (egui::Key::N, 'n'), (egui::Key::O, 'o'),
-            (egui::Key::P, 'p'), (egui::Key::Q, 'q'), (egui::Key::R, 'r'),
-            (egui::Key::S, 's'), (egui::Key::T, 't'), (egui::Key::U, 'u'),
-            (egui::Key::V, 'v'), (egui::Key::W, 'w'), (egui::Key::X, 'x'),
-            (egui::Key::Y, 'y'), (egui::Key::Z, 'z'),
+            (egui::Key::A, 'a'),
+            (egui::Key::B, 'b'),
+            (egui::Key::C, 'c'),
+            (egui::Key::D, 'd'),
+            (egui::Key::E, 'e'),
+            (egui::Key::F, 'f'),
+            (egui::Key::G, 'g'),
+            (egui::Key::H, 'h'),
+            (egui::Key::I, 'i'),
+            (egui::Key::J, 'j'),
+            (egui::Key::K, 'k'),
+            (egui::Key::L, 'l'),
+            (egui::Key::M, 'm'),
+            (egui::Key::N, 'n'),
+            (egui::Key::O, 'o'),
+            (egui::Key::P, 'p'),
+            (egui::Key::Q, 'q'),
+            (egui::Key::R, 'r'),
+            (egui::Key::S, 's'),
+            (egui::Key::T, 't'),
+            (egui::Key::U, 'u'),
+            (egui::Key::V, 'v'),
+            (egui::Key::W, 'w'),
+            (egui::Key::X, 'x'),
+            (egui::Key::Y, 'y'),
+            (egui::Key::Z, 'z'),
         ] {
-            if input.key_pressed(*key) && !input.modifiers.ctrl && !input.modifiers.alt && !input.modifiers.shift {
+            if input.key_pressed(*key)
+                && !input.modifiers.ctrl
+                && !input.modifiers.alt
+                && !input.modifiers.shift
+            {
                 return Some(*ch);
             }
         }

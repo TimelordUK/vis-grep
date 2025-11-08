@@ -56,7 +56,7 @@ impl Default for VisGrepApp {
                 std::env::current_dir()
                     .unwrap_or_default()
                     .to_string_lossy()
-                    .as_ref()
+                    .as_ref(),
             ),
             file_pattern: String::from("*.log"),
             search_query: String::new(),
@@ -148,282 +148,33 @@ impl eframe::App for VisGrepApp {
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("VisGrep - Fast Search Tool");
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // Show pending input state (e.g., "3" or "g")
-                    let status = self.input_handler.get_status();
-                    if !status.is_empty() {
-                        ui.label(format!("Command: {}", status));
-                    }
-
-                    // Show active marks
-                    if !self.marks.is_empty() {
-                        let marks_str: String = self.marks.keys().collect();
-                        ui.label(format!("Marks: {}", marks_str));
-                    }
-                });
-            });
+            // Header with title and status
+            self.render_header(ui);
             ui.separator();
 
-            // FIX tag highlighting pattern
-            ui.horizontal(|ui| {
-                ui.label("Highlight pattern in Matched Line (e.g., 150= or fn):");
-                let response = ui.add(egui::TextEdit::singleline(&mut self.fix_highlight_pattern).desired_width(150.0).hint_text("uses search query if empty"));
-
-                // Show active indicator
-                let active_pattern = if !self.fix_highlight_pattern.is_empty() {
-                    &self.fix_highlight_pattern
-                } else {
-                    &self.search_query
-                };
-
-                if !active_pattern.is_empty() {
-                    ui.label(egui::RichText::new(format!("✓ Active: '{}'", active_pattern))
-                        .color(egui::Color32::from_rgb(100, 255, 100)));
-                }
-
-                if ui.small_button("Clear").clicked() {
-                    self.fix_highlight_pattern.clear();
-                }
-
-                // Log when pattern changes
-                if response.changed() {
-                    info!("Highlight pattern changed to: '{}'", self.fix_highlight_pattern);
-                }
-            });
-
+            // Search controls
+            self.render_highlight_pattern_field(ui);
             ui.separator();
 
-            // Search parameters
-            ui.horizontal(|ui| {
-                ui.label("Search Path:");
-                ui.add(egui::TextEdit::singleline(&mut self.search_path).desired_width(350.0));
-
-                // Preset folders dropdown
-                egui::ComboBox::from_id_salt("folder_presets")
-                    .selected_text("📁")
-                    .width(40.0)
-                    .show_ui(ui, |ui| {
-                        for preset in &self.config.folder_presets {
-                            if ui.selectable_label(false, &preset.name).clicked() {
-                                self.search_path = Self::expand_tilde(&preset.path);
-                                info!("Selected preset: {} -> {}", preset.name, self.search_path);
-                            }
-                        }
-                    });
-
-                if ui.button("Current Dir").clicked() {
-                    if let Ok(cwd) = std::env::current_dir() {
-                        self.search_path = cwd.display().to_string();
-                    }
-                }
-
-                if ui.button("Browse...").clicked() {
-                    match rfd::FileDialog::new().pick_folder() {
-                        Some(path) => {
-                            self.search_path = path.display().to_string();
-                            info!("Selected folder: {}", self.search_path);
-                        }
-                        None => {
-                            info!("Browse dialog cancelled or unavailable");
-                        }
-                    }
-                }
-
-                ui.label("File Pattern:");
-                ui.add(egui::TextEdit::singleline(&mut self.file_pattern).desired_width(150.0));
-                if ui.small_button("Clear").clicked() {
-                    self.file_pattern.clear();
-                }
-            });
-
+            self.render_search_path_field(ui);
             ui.separator();
 
-            // Search query
-            ui.horizontal(|ui| {
-                ui.label("Search Query:");
-                let response =
-                    ui.add(egui::TextEdit::singleline(&mut self.search_query).desired_width(300.0));
-
-                // Saved patterns dropdown
-                if !self.config.saved_patterns.is_empty() {
-                    egui::ComboBox::from_id_salt("saved_patterns")
-                        .selected_text("📝")
-                        .width(40.0)
-                        .show_ui(ui, |ui| {
-                            // Group by category if available
-                            let mut by_category: std::collections::HashMap<String, Vec<&config::SavedPattern>> =
-                                std::collections::HashMap::new();
-
-                            for pattern in &self.config.saved_patterns {
-                                let cat = if pattern.category.is_empty() {
-                                    "Other".to_string()
-                                } else {
-                                    pattern.category.clone()
-                                };
-                                by_category.entry(cat).or_insert_with(Vec::new).push(pattern);
-                            }
-
-                            let mut categories: Vec<_> = by_category.keys().collect();
-                            categories.sort();
-
-                            for category in categories {
-                                if let Some(patterns) = by_category.get(category) {
-                                    if by_category.len() > 1 {
-                                        ui.label(egui::RichText::new(category).strong());
-                                        ui.separator();
-                                    }
-
-                                    for pattern in patterns {
-                                        let label = if pattern.description.is_empty() {
-                                            pattern.name.clone()
-                                        } else {
-                                            format!("{}", pattern.name)
-                                        };
-
-                                        let mut button = ui.selectable_label(false, label);
-
-                                        if !pattern.description.is_empty() {
-                                            button = button.on_hover_text(&pattern.description);
-                                        }
-
-                                        if button.clicked() {
-                                            self.search_query = pattern.pattern.clone();
-                                            info!("Loaded pattern: {} -> {}", pattern.name, pattern.pattern);
-                                        }
-                                    }
-
-                                    if by_category.len() > 1 {
-                                        ui.separator();
-                                    }
-                                }
-                            }
-                        });
-                }
-
-                // Debounced auto-search: trigger search 500ms after typing stops
-                if response.changed() {
-                    self.pending_search = true;
-                    self.last_search_time = Instant::now();
-                }
-
-                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    if !self.search_query.is_empty() {
-                        self.perform_search();
-                    }
-                }
-
-                ui.checkbox(&mut self.case_sensitive, "Case Sensitive");
-                ui.checkbox(&mut self.use_regex, "Regex");
-                ui.checkbox(&mut self.recursive, "Recursive");
-
-                if ui.button("Search").clicked() && !self.search_query.is_empty() {
-                    self.perform_search();
-                }
-            });
+            self.render_search_query_field(ui);
+            ui.separator();
 
             // File age filter
-            ui.horizontal(|ui| {
-                ui.label("File Age:");
-                let mut enabled = self.file_age_hours.is_some();
-                ui.checkbox(&mut enabled, "Only files modified in last");
-
-                if enabled && self.file_age_hours.is_none() {
-                    self.file_age_hours = Some(24);
-                } else if !enabled {
-                    self.file_age_hours = None;
-                }
-
-                if let Some(ref mut hours) = self.file_age_hours {
-                    ui.add(
-                        egui::DragValue::new(hours)
-                            .suffix(" hours")
-                            .speed(1.0)
-                            .clamp_range(1..=8760),
-                    );
-                }
-            });
-
+            self.render_file_age_filter(ui);
             ui.separator();
 
-            // Check for debounced search
-            if self.pending_search && !self.search_query.is_empty() {
-                let elapsed = self.last_search_time.elapsed();
-                if elapsed.as_millis() > 500 {
-                    self.perform_search();
-                } else {
-                    // Request repaint to check again
-                    ctx.request_repaint();
-                }
-            }
+            // Results filter
+            self.render_results_filter(ui);
+            ui.separator();
 
-            // Results controls and filter
-            if !self.results.is_empty() {
-                ui.horizontal(|ui| {
-                    ui.label(format!(
-                        "Found {} matches in {} files",
-                        self.results.iter().map(|r| r.matches.len()).sum::<usize>(),
-                        self.results.len()
-                    ));
-
-                    ui.separator();
-
-                    ui.label("Filter results:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.results_filter)
-                            .hint_text("filename filter...")
-                            .desired_width(150.0),
-                    );
-
-                    if ui.small_button("Clear").clicked() {
-                        self.results_filter.clear();
-                    }
-
-                    ui.separator();
-
-                    if ui.button("Expand All").clicked() {
-                        info!(
-                            "Expand All clicked - expanding {} results",
-                            self.results.len()
-                        );
-                        for i in 0..self.results.len() {
-                            self.collapsing_state.insert(i, true);
-                        }
-                        info!("Collapsing state: {:?}", self.collapsing_state);
-                    }
-                    if ui.button("Collapse All").clicked() {
-                        info!(
-                            "Collapse All clicked - collapsing {} results",
-                            self.results.len()
-                        );
-                        for i in 0..self.results.len() {
-                            self.collapsing_state.insert(i, false);
-                        }
-                        info!("Collapsing state: {:?}", self.collapsing_state);
-                    }
-                });
-                ui.separator();
-            }
-
-            // Split view: results, matched line focus, and preview
-            let available_height = ui.available_height();
+            // Main content area - results and preview
+            let available_height = ui.available_height() - 30.0; // Reserve space for status
 
             // Results panel (40% of available height)
-            egui::ScrollArea::vertical()
-                .id_source("results_scroll") // Give it a unique ID
-                .max_height(available_height * 0.4)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    if self.searching {
-                        ui.label("Searching...");
-                    } else if self.results.is_empty() && !self.search_query.is_empty() {
-                        ui.label("No results found");
-                    } else {
-                        self.render_results(ui);
-                    }
-                });
+            self.render_results(ui);
 
             ui.separator();
 
@@ -438,74 +189,27 @@ impl eframe::App for VisGrepApp {
 
             ui.separator();
 
-            // Preview panel (take remaining space)
-            ui.horizontal(|ui| {
-                ui.heading("Preview");
+            // Preview panel (remaining space)
+            ui.label("Preview:");
+            self.render_preview(ui);
 
-                // Add open in explorer button if we have a file selected
-                if self.selected_result.is_some() && !self.results.is_empty() {
-                    if ui.button("Open in Explorer").clicked() {
-                        self.open_in_explorer();
-                    }
-                }
+            ui.separator();
 
-                // Add copy to clipboard button if we have content
-                if self.preview.content.is_some() {
-                    if ui.button("Copy All to Clipboard").clicked() {
-                        if let Some(content) = &self.preview.content {
-                            match Clipboard::new() {
-                                Ok(mut clipboard) => match clipboard.set_text(content.clone()) {
-                                    Ok(_) => info!("Copied {} chars to clipboard", content.len()),
-                                    Err(e) => info!("Failed to copy to clipboard: {}", e),
-                                },
-                                Err(e) => info!("Failed to access clipboard: {}", e),
-                            }
-                        }
-                    }
-                }
-
-                // Add copy matched line button if we have a matched line
-                if self.preview.matched_line_text.is_some() {
-                    if ui.button("Copy Matched Line").clicked() {
-                        if let Some(matched_line) = &self.preview.matched_line_text {
-                            match Clipboard::new() {
-                                Ok(mut clipboard) => {
-                                    match clipboard.set_text(matched_line.clone()) {
-                                        Ok(_) => info!(
-                                            "Copied matched line ({} chars) to clipboard",
-                                            matched_line.len()
-                                        ),
-                                        Err(e) => {
-                                            info!("Failed to copy matched line to clipboard: {}", e)
-                                        }
-                                    }
-                                }
-                                Err(e) => info!("Failed to access clipboard: {}", e),
-                            }
-                        }
-                    }
-                }
-            });
-
-            let remaining_height = ui.available_height();
-
-            // Use stored scroll offset only when we explicitly want to scroll to a match
-            let mut scroll_area = egui::ScrollArea::vertical()
-                .id_source("preview_scroll") // Give it a unique ID
-                .max_height(remaining_height)
-                .auto_shrink([false, false]);
-
-            // Only force scroll position when a new match is selected
-            if self.should_scroll_to_match {
-                scroll_area =
-                    scroll_area.scroll_offset(egui::Vec2::new(0.0, self.preview_scroll_offset));
-                self.should_scroll_to_match = false; // Reset flag after applying
-            }
-
-            scroll_area.show(ui, |ui| {
-                self.render_preview(ui);
-            });
+            // Status bar
+            self.render_status_bar(ui);
         });
+
+        // Debounced search handling
+        if self.pending_search
+            && self.last_search_time.elapsed() > std::time::Duration::from_millis(500)
+        {
+            if !self.search_query.is_empty() {
+                self.perform_search();
+                self.pending_search = false;
+            }
+        }
+
+        ctx.request_repaint();
     }
 }
 
@@ -1067,19 +771,12 @@ impl VisGrepApp {
 
             let has_pattern = !pattern_to_use.is_empty();
 
-            info!("Rendering matched line. Pattern: '{}', Has pattern: {}, Line: '{}'",
-                  pattern_to_use, has_pattern, matched_line);
-
             if has_pattern && matched_line.contains(pattern_to_use) {
                 // Render with highlighted pattern
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
 
                     let parts: Vec<&str> = matched_line.split(pattern_to_use).collect();
-
-                    // Debug: log what we're splitting
-                    info!("Highlighting pattern '{}' in line: {}", pattern_to_use, matched_line);
-                    info!("Split into {} parts", parts.len());
 
                     for (i, part) in parts.iter().enumerate() {
                         if !part.is_empty() {
@@ -1088,24 +785,25 @@ impl VisGrepApp {
 
                         // Add highlighted pattern between parts (except after last part)
                         if i < parts.len() - 1 {
-                            ui.label(RichText::new(pattern_to_use)
-                                .color(highlight_color)
-                                .background_color(highlight_bg)
-                                .strong());
+                            ui.label(
+                                RichText::new(pattern_to_use)
+                                    .color(highlight_color)
+                                    .background_color(highlight_bg)
+                                    .strong(),
+                            );
                         }
                     }
                 });
             } else {
                 // Just show the line normally
-                if has_pattern {
-                    info!("Pattern '{}' not found in line: {}", pattern_to_use, matched_line);
-                }
                 ui.label(matched_line);
             }
         } else {
-            ui.label(RichText::new("Select a match to see the line here")
-                .italics()
-                .color(Color32::GRAY));
+            ui.label(
+                RichText::new("Select a match to see the line here")
+                    .italics()
+                    .color(Color32::GRAY),
+            );
         }
     }
 
@@ -1175,6 +873,253 @@ impl VisGrepApp {
         } else {
             false
         }
+    }
+
+    // ============================================================================
+    // UI Rendering Functions - Extracted from update()
+    // ============================================================================
+
+    /// Render the header with title and status indicators
+    fn render_header(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.heading("VisGrep - Fast Search Tool");
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Show pending input state (e.g., "3" or "g")
+                let status = self.input_handler.get_status();
+                if !status.is_empty() {
+                    ui.label(format!("Command: {}", status));
+                }
+
+                // Show active marks
+                if !self.marks.is_empty() {
+                    let marks_str: String = self.marks.keys().collect();
+                    ui.label(format!("Marks: {}", marks_str));
+                }
+            });
+        });
+    }
+
+    /// Render the highlight pattern field
+    fn render_highlight_pattern_field(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Highlight pattern in Matched Line (e.g., 150= or fn):");
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut self.fix_highlight_pattern)
+                    .desired_width(150.0)
+                    .hint_text("uses search query if empty"),
+            );
+
+            // Show active indicator
+            let active_pattern = if !self.fix_highlight_pattern.is_empty() {
+                &self.fix_highlight_pattern
+            } else {
+                &self.search_query
+            };
+
+            if !active_pattern.is_empty() {
+                ui.label(
+                    egui::RichText::new(format!("✓ Active: '{}'", active_pattern))
+                        .color(egui::Color32::from_rgb(100, 255, 100)),
+                );
+            }
+
+            if ui.small_button("Clear").clicked() {
+                self.fix_highlight_pattern.clear();
+            }
+
+            // Log when pattern changes
+            if response.changed() {
+                info!("Highlight pattern changed to: '{}'", self.fix_highlight_pattern);
+            }
+        });
+    }
+
+    /// Render the search path field with folder presets
+    fn render_search_path_field(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Search Path:");
+            ui.add(egui::TextEdit::singleline(&mut self.search_path).desired_width(350.0));
+
+            // Preset folders dropdown
+            egui::ComboBox::from_id_salt("folder_presets")
+                .selected_text("📁")
+                .width(40.0)
+                .show_ui(ui, |ui| {
+                    for preset in &self.config.folder_presets {
+                        if ui.selectable_label(false, &preset.name).clicked() {
+                            self.search_path = Self::expand_tilde(&preset.path);
+                            info!("Selected preset: {} -> {}", preset.name, self.search_path);
+                        }
+                    }
+                });
+
+            if ui.button("Current Dir").clicked() {
+                if let Ok(cwd) = std::env::current_dir() {
+                    self.search_path = cwd.display().to_string();
+                }
+            }
+
+            if ui.button("Browse...").clicked() {
+                match rfd::FileDialog::new().pick_folder() {
+                    Some(path) => {
+                        self.search_path = path.display().to_string();
+                        info!("Selected folder: {}", self.search_path);
+                    }
+                    None => {
+                        info!("Browse dialog cancelled or unavailable");
+                    }
+                }
+            }
+
+            ui.label("File Pattern:");
+            ui.add(egui::TextEdit::singleline(&mut self.file_pattern).desired_width(150.0));
+            if ui.small_button("Clear").clicked() {
+                self.file_pattern.clear();
+            }
+        });
+    }
+
+    /// Render the search query field with patterns dropdown
+    fn render_search_query_field(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Search Query:");
+            let response =
+                ui.add(egui::TextEdit::singleline(&mut self.search_query).desired_width(300.0));
+
+            // Saved patterns dropdown
+            if !self.config.saved_patterns.is_empty() {
+                self.render_patterns_dropdown(ui);
+            }
+
+            // Debounced auto-search: trigger search 500ms after typing stops
+            if response.changed() {
+                self.pending_search = true;
+                self.last_search_time = Instant::now();
+            }
+
+            if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if !self.search_query.is_empty() {
+                    self.perform_search();
+                }
+            }
+
+            ui.checkbox(&mut self.case_sensitive, "Case Sensitive");
+            ui.checkbox(&mut self.use_regex, "Regex");
+            ui.checkbox(&mut self.recursive, "Recursive");
+
+            if ui.button("Search").clicked() && !self.search_query.is_empty() {
+                self.perform_search();
+            }
+        });
+    }
+
+    /// Render the saved patterns dropdown
+    fn render_patterns_dropdown(&mut self, ui: &mut egui::Ui) {
+        egui::ComboBox::from_id_salt("saved_patterns")
+            .selected_text("📝")
+            .width(40.0)
+            .show_ui(ui, |ui| {
+                // Group by category if available
+                let mut by_category: std::collections::HashMap<String, Vec<&config::SavedPattern>> =
+                    std::collections::HashMap::new();
+
+                for pattern in &self.config.saved_patterns {
+                    let cat = if pattern.category.is_empty() {
+                        "Other".to_string()
+                    } else {
+                        pattern.category.clone()
+                    };
+                    by_category.entry(cat).or_insert_with(Vec::new).push(pattern);
+                }
+
+                let mut categories: Vec<_> = by_category.keys().collect();
+                categories.sort();
+
+                for category in categories {
+                    if let Some(patterns) = by_category.get(category) {
+                        if by_category.len() > 1 {
+                            ui.label(egui::RichText::new(category).strong());
+                            ui.separator();
+                        }
+
+                        for pattern in patterns {
+                            let label = if pattern.description.is_empty() {
+                                pattern.name.clone()
+                            } else {
+                                format!("{}", pattern.name)
+                            };
+
+                            let mut button = ui.selectable_label(false, label);
+
+                            if !pattern.description.is_empty() {
+                                button = button.on_hover_text(&pattern.description);
+                            }
+
+                            if button.clicked() {
+                                self.search_query = pattern.pattern.clone();
+                                info!("Loaded pattern: {} -> {}", pattern.name, pattern.pattern);
+                            }
+                        }
+
+                        if by_category.len() > 1 {
+                            ui.separator();
+                        }
+                    }
+                }
+            });
+    }
+
+    /// Render file age filter controls
+    fn render_file_age_filter(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("File Age:");
+            let mut enabled = self.file_age_hours.is_some();
+            ui.checkbox(&mut enabled, "Filter by age");
+
+            if enabled {
+                let mut hours = self.file_age_hours.unwrap_or(24);
+                ui.add(
+                    egui::DragValue::new(&mut hours)
+                        .speed(1.0)
+                        .clamp_range(1..=8760),
+                );
+                ui.label("hours");
+                self.file_age_hours = Some(hours);
+            } else {
+                self.file_age_hours = None;
+            }
+
+            if ui.small_button("?").clicked() {
+                info!("File Age Filter: Only search files modified within the specified hours");
+            }
+        });
+    }
+
+    /// Render results filter field
+    fn render_results_filter(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Filter Results:");
+            ui.add(egui::TextEdit::singleline(&mut self.results_filter).desired_width(300.0));
+            if ui.small_button("Clear").clicked() {
+                self.results_filter.clear();
+            }
+        });
+    }
+
+    /// Render status bar showing search stats
+    fn render_status_bar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            let total_matches: usize = self.results.iter().map(|r| r.matches.len()).sum();
+            let file_count = self.results.len();
+
+            ui.label(format!("Found {} matches in {} files", total_matches, file_count));
+
+            if self.searching {
+                ui.spinner();
+                ui.label("Searching...");
+            }
+        });
     }
 }
 
