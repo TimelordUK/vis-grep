@@ -247,6 +247,62 @@ impl eframe::App for VisGrepApp {
                 let response =
                     ui.add(egui::TextEdit::singleline(&mut self.search_query).desired_width(300.0));
 
+                // Saved patterns dropdown
+                if !self.config.saved_patterns.is_empty() {
+                    egui::ComboBox::from_id_salt("saved_patterns")
+                        .selected_text("📝")
+                        .width(40.0)
+                        .show_ui(ui, |ui| {
+                            // Group by category if available
+                            let mut by_category: std::collections::HashMap<String, Vec<&config::SavedPattern>> =
+                                std::collections::HashMap::new();
+
+                            for pattern in &self.config.saved_patterns {
+                                let cat = if pattern.category.is_empty() {
+                                    "Other".to_string()
+                                } else {
+                                    pattern.category.clone()
+                                };
+                                by_category.entry(cat).or_insert_with(Vec::new).push(pattern);
+                            }
+
+                            let mut categories: Vec<_> = by_category.keys().collect();
+                            categories.sort();
+
+                            for category in categories {
+                                if let Some(patterns) = by_category.get(category) {
+                                    if by_category.len() > 1 {
+                                        ui.label(egui::RichText::new(category).strong());
+                                        ui.separator();
+                                    }
+
+                                    for pattern in patterns {
+                                        let label = if pattern.description.is_empty() {
+                                            pattern.name.clone()
+                                        } else {
+                                            format!("{}", pattern.name)
+                                        };
+
+                                        let mut button = ui.selectable_label(false, label);
+
+                                        if !pattern.description.is_empty() {
+                                            button = button.on_hover_text(&pattern.description);
+                                        }
+
+                                        if button.clicked() {
+                                            self.search_query = pattern.pattern.clone();
+                                            info!("Loaded pattern: {} -> {}", pattern.name, pattern.pattern);
+                                        }
+                                    }
+
+                                    if by_category.len() > 1 {
+                                        ui.separator();
+                                    }
+                                }
+                            }
+                        });
+                }
+
                 // Debounced auto-search: trigger search 500ms after typing stops
                 if response.changed() {
                     self.pending_search = true;

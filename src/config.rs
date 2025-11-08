@@ -10,8 +10,20 @@ pub struct FolderPreset {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedPattern {
+    pub name: String,
+    pub pattern: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub category: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub folder_presets: Vec<FolderPreset>,
+    #[serde(default)]
+    pub saved_patterns: Vec<SavedPattern>,
 }
 
 impl Default for Config {
@@ -27,6 +39,7 @@ impl Default for Config {
                     path: ".".to_string(),
                 },
             ],
+            saved_patterns: vec![],
         }
     }
 }
@@ -112,6 +125,20 @@ impl Config {
                 FolderPreset {
                     name: "Project".to_string(),
                     path: "~/dev/myproject".to_string(),
+                },
+            ],
+            saved_patterns: vec![
+                SavedPattern {
+                    name: "Execution Report".to_string(),
+                    pattern: "35=8".to_string(),
+                    description: "MsgType = Execution Report".to_string(),
+                    category: "FIX".to_string(),
+                },
+                SavedPattern {
+                    name: "Error".to_string(),
+                    pattern: "(?i)error".to_string(),
+                    description: "Case-insensitive error messages".to_string(),
+                    category: "Errors".to_string(),
                 },
             ],
         };
