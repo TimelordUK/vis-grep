@@ -20,6 +20,9 @@ pub enum NavigationCommand {
 
     // Clipboard operations
     YankMatchedLine,           // yy - yank (copy) matched line to clipboard
+
+    // File operations
+    OpenInExplorer,            // gf - open file in explorer/finder
 }
 
 pub struct InputHandler {
@@ -150,7 +153,7 @@ impl InputHandler {
                 }
                 self.reset();
             }
-            // 'g' - start of multi-key sequence (gg = first match)
+            // 'g' - start of multi-key sequence (gg = first match, gf = open in explorer)
             else if i.key_pressed(egui::Key::G) && !i.modifiers.ctrl && !i.modifiers.alt {
                 if self.pending_keys == "g" {
                     // Second 'g' - go to first match
@@ -165,7 +168,19 @@ impl InputHandler {
                 } else {
                     // First 'g' - wait for second key
                     self.pending_keys = "g".to_string();
-                    info!("Pending: g (waiting for second g)");
+                    info!("Pending: g (waiting for second g or f)");
+                }
+            }
+            // 'f' - could be part of 'gf' sequence
+            else if i.key_pressed(egui::Key::F) && !i.modifiers.ctrl && !i.modifiers.alt && !i.modifiers.shift {
+                if self.pending_keys == "g" {
+                    // 'gf' - open file in explorer
+                    info!("Command: gf (open in explorer)");
+                    command = Some(NavigationCommand::OpenInExplorer);
+                    self.reset();
+                } else {
+                    // 'f' without 'g' prefix - ignore for now
+                    info!("Ignoring standalone 'f'");
                 }
             }
             // Escape to cancel pending commands

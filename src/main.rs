@@ -282,6 +282,13 @@ impl eframe::App for VisGrepApp {
             ui.horizontal(|ui| {
                 ui.heading("Preview");
 
+                // Add open in explorer button if we have a file selected
+                if self.selected_result.is_some() && !self.results.is_empty() {
+                    if ui.button("Open in Explorer").clicked() {
+                        self.open_in_explorer();
+                    }
+                }
+
                 // Add copy to clipboard button if we have content
                 if self.preview.content.is_some() {
                     if ui.button("Copy All to Clipboard").clicked() {
@@ -430,6 +437,91 @@ impl VisGrepApp {
                 }
             }
             NavigationCommand::YankMatchedLine => self.yank_matched_line(),
+            NavigationCommand::OpenInExplorer => self.open_in_explorer(),
+        }
+    }
+
+    fn open_in_explorer(&self) {
+        if self.results.is_empty() {
+            info!("No results to open");
+            return;
+        }
+
+        let current_id = self.selected_result.unwrap_or(0);
+        let current_file_idx = current_id / 10000;
+
+        if current_file_idx >= self.results.len() {
+            info!("Invalid file index");
+            return;
+        }
+
+        let file_path = &self.results[current_file_idx].file_path;
+
+        #[cfg(target_os = "windows")]
+        {
+            // On Windows, use 'explorer /select,' to open Explorer and select the file
+            if let Err(e) = std::process::Command::new("explorer")
+                .args(&["/select,", &file_path.to_string_lossy()])
+                .spawn()
+            {
+                info!("Failed to open explorer: {}", e);
+            } else {
+                info!("Opened file in Explorer: {:?}", file_path);
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            // On macOS, use 'open -R' to reveal in Finder
+            if let Err(e) = std::process::Command::new("open")
+                .args(&["-R", &file_path.to_string_lossy()])
+                .spawn()
+            {
+                info!("Failed to open Finder: {}", e);
+            } else {
+                info!("Opened file in Finder: {:?}", file_path);
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            // On Linux, try various file managers
+            let file_managers = [
+                ("nautilus", vec!["--select"]),
+                ("dolphin", vec!["--select"]),
+                ("nemo", vec![]),
+                ("thunar", vec![]),
+                ("xdg-open", vec![]),
+            ];
+
+            let parent_dir = file_path.parent().unwrap_or(file_path.as_ref());
+            let mut opened = false;
+
+            for (manager, args) in &file_managers {
+                let mut cmd = std::process::Command::new(manager);
+                for arg in args {
+                    cmd.arg(arg);
+                }
+                cmd.arg(&file_path.to_string_lossy().to_string());
+
+                if cmd.spawn().is_ok() {
+                    info!("Opened file with {}: {:?}", manager, file_path);
+                    opened = true;
+                    break;
+                }
+            }
+
+            if !opened {
+                // Fallback: just open the parent directory
+                if let Err(e) = std::process::Command::new("xdg-open")
+                    .arg(&parent_dir.to_string_lossy().to_string())
+                    .spawn()
+                {
+                    info!("Failed to open file manager: {}", e);
+                } else {
+                    info!("Opened parent directory: {:?}", parent_dir);
+                }
+            }
         }
     }
 
