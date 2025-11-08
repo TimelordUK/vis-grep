@@ -429,6 +429,23 @@ impl VisGrepApp {
                     self.select_previous_file();
                 }
             }
+            NavigationCommand::YankMatchedLine => self.yank_matched_line(),
+        }
+    }
+
+    fn yank_matched_line(&mut self) {
+        if let Some(matched_line) = &self.preview.matched_line_text {
+            match Clipboard::new() {
+                Ok(mut clipboard) => {
+                    match clipboard.set_text(matched_line.clone()) {
+                        Ok(_) => info!("Yanked matched line ({} chars) to clipboard", matched_line.len()),
+                        Err(e) => info!("Failed to yank matched line to clipboard: {}", e),
+                    }
+                }
+                Err(e) => info!("Failed to access clipboard: {}", e),
+            }
+        } else {
+            info!("No matched line to yank");
         }
     }
 

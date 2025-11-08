@@ -17,6 +17,9 @@ pub enum NavigationCommand {
     PreviousFile,              // P - jump to first match in previous file
     NextFileWithCount(usize),  // 2N - jump forward 2 files
     PreviousFileWithCount(usize), // 2P - jump backward 2 files
+
+    // Clipboard operations
+    YankMatchedLine,           // yy - yank (copy) matched line to clipboard
 }
 
 pub struct InputHandler {
@@ -52,6 +55,22 @@ impl InputHandler {
                 command = Some(NavigationCommand::LastMatchInCurrentFile);
                 self.reset();
                 return;
+            }
+
+            // 'y' - start of yank sequence (yy = yank matched line)
+            if i.key_pressed(egui::Key::Y) && !i.modifiers.shift && !i.modifiers.ctrl && !i.modifiers.alt {
+                if self.pending_keys == "y" {
+                    // Second 'y' - yank matched line
+                    info!("Command: yy (yank matched line)");
+                    command = Some(NavigationCommand::YankMatchedLine);
+                    self.reset();
+                    return;
+                } else {
+                    // First 'y' - wait for second key
+                    self.pending_keys = "y".to_string();
+                    info!("Pending: y (waiting for second y)");
+                    return;
+                }
             }
 
             // Check for digit keys to build up count (e.g., "3n" -> move 3 times)
