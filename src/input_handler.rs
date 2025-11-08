@@ -9,6 +9,14 @@ pub enum NavigationCommand {
     LastMatch,
     NextMatchWithCount(usize),
     PreviousMatchWithCount(usize),
+
+    // File-level navigation
+    FirstMatchInCurrentFile,   // ^ - jump to first match in current file
+    LastMatchInCurrentFile,    // $ - jump to last match in current file
+    NextFile,                  // N - jump to first match in next file
+    PreviousFile,              // P - jump to first match in previous file
+    NextFileWithCount(usize),  // 2N - jump forward 2 files
+    PreviousFileWithCount(usize), // 2P - jump backward 2 files
 }
 
 pub struct InputHandler {
@@ -30,13 +38,30 @@ impl InputHandler {
         let mut command = None;
 
         ctx.input(|i| {
+            // Check for special shift+number combos FIRST (before digit processing)
+            // '^' - first match in current file (Shift+6)
+            if i.key_pressed(egui::Key::Num6) && i.modifiers.shift && !i.modifiers.ctrl && !i.modifiers.alt {
+                info!("Command: ^ (first match in current file)");
+                command = Some(NavigationCommand::FirstMatchInCurrentFile);
+                self.reset();
+                return;
+            }
+            // '$' - last match in current file (Shift+4)
+            if i.key_pressed(egui::Key::Num4) && i.modifiers.shift && !i.modifiers.ctrl && !i.modifiers.alt {
+                info!("Command: $ (last match in current file)");
+                command = Some(NavigationCommand::LastMatchInCurrentFile);
+                self.reset();
+                return;
+            }
+
             // Check for digit keys to build up count (e.g., "3n" -> move 3 times)
+            // Only process if shift is NOT pressed (to avoid conflicts with ^ and $)
             for key in &[
                 egui::Key::Num0, egui::Key::Num1, egui::Key::Num2, egui::Key::Num3,
                 egui::Key::Num4, egui::Key::Num5, egui::Key::Num6, egui::Key::Num7,
                 egui::Key::Num8, egui::Key::Num9,
             ] {
-                if i.key_pressed(*key) && !i.modifiers.ctrl && !i.modifiers.alt {
+                if i.key_pressed(*key) && !i.modifiers.shift && !i.modifiers.ctrl && !i.modifiers.alt {
                     let digit = match key {
                         egui::Key::Num0 => '0',
                         egui::Key::Num1 => '1',
@@ -62,24 +87,48 @@ impl InputHandler {
 
             // 'n' - next match (with optional count)
             if i.key_pressed(egui::Key::N) && !i.modifiers.ctrl && !i.modifiers.alt {
-                command = if self.count_buffer.is_empty() {
-                    Some(NavigationCommand::NextMatch)
+                if i.modifiers.shift {
+                    // Shift+N - next file
+                    command = if self.count_buffer.is_empty() {
+                        Some(NavigationCommand::NextFile)
+                    } else {
+                        let count = self.count_buffer.parse::<usize>().unwrap_or(1);
+                        info!("Next file with count: {}", count);
+                        Some(NavigationCommand::NextFileWithCount(count))
+                    };
                 } else {
-                    let count = self.count_buffer.parse::<usize>().unwrap_or(1);
-                    info!("Next match with count: {}", count);
-                    Some(NavigationCommand::NextMatchWithCount(count))
-                };
+                    // lowercase n - next match
+                    command = if self.count_buffer.is_empty() {
+                        Some(NavigationCommand::NextMatch)
+                    } else {
+                        let count = self.count_buffer.parse::<usize>().unwrap_or(1);
+                        info!("Next match with count: {}", count);
+                        Some(NavigationCommand::NextMatchWithCount(count))
+                    };
+                }
                 self.reset();
             }
             // 'p' - previous match (with optional count)
             else if i.key_pressed(egui::Key::P) && !i.modifiers.ctrl && !i.modifiers.alt {
-                command = if self.count_buffer.is_empty() {
-                    Some(NavigationCommand::PreviousMatch)
+                if i.modifiers.shift {
+                    // Shift+P - previous file
+                    command = if self.count_buffer.is_empty() {
+                        Some(NavigationCommand::PreviousFile)
+                    } else {
+                        let count = self.count_buffer.parse::<usize>().unwrap_or(1);
+                        info!("Previous file with count: {}", count);
+                        Some(NavigationCommand::PreviousFileWithCount(count))
+                    };
                 } else {
-                    let count = self.count_buffer.parse::<usize>().unwrap_or(1);
-                    info!("Previous match with count: {}", count);
-                    Some(NavigationCommand::PreviousMatchWithCount(count))
-                };
+                    // lowercase p - previous match
+                    command = if self.count_buffer.is_empty() {
+                        Some(NavigationCommand::PreviousMatch)
+                    } else {
+                        let count = self.count_buffer.parse::<usize>().unwrap_or(1);
+                        info!("Previous match with count: {}", count);
+                        Some(NavigationCommand::PreviousMatchWithCount(count))
+                    };
+                }
                 self.reset();
             }
             // 'g' - start of multi-key sequence (gg = first match)

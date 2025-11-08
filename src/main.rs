@@ -415,6 +415,20 @@ impl VisGrepApp {
                     self.select_previous_match();
                 }
             }
+            NavigationCommand::FirstMatchInCurrentFile => self.select_first_match_in_current_file(),
+            NavigationCommand::LastMatchInCurrentFile => self.select_last_match_in_current_file(),
+            NavigationCommand::NextFile => self.select_next_file(),
+            NavigationCommand::PreviousFile => self.select_previous_file(),
+            NavigationCommand::NextFileWithCount(count) => {
+                for _ in 0..count {
+                    self.select_next_file();
+                }
+            }
+            NavigationCommand::PreviousFileWithCount(count) => {
+                for _ in 0..count {
+                    self.select_previous_file();
+                }
+            }
         }
     }
 
@@ -448,6 +462,101 @@ impl VisGrepApp {
                 let file_path = self.results[file_idx].file_path.clone();
                 let line_number = self.results[file_idx].matches[last_match_idx].line_number;
                 self.select_match_with_keyboard(result_id, &file_path, line_number);
+                return;
+            }
+        }
+    }
+
+    fn select_first_match_in_current_file(&mut self) {
+        if self.results.is_empty() {
+            return;
+        }
+
+        let current_id = self.selected_result.unwrap_or(0);
+        let current_file_idx = current_id / 10000;
+
+        if current_file_idx < self.results.len() && !self.results[current_file_idx].matches.is_empty() {
+            let result_id = current_file_idx * 10000;
+            let file_path = self.results[current_file_idx].file_path.clone();
+            let line_number = self.results[current_file_idx].matches[0].line_number;
+            self.select_match_with_keyboard(result_id, &file_path, line_number);
+        }
+    }
+
+    fn select_last_match_in_current_file(&mut self) {
+        if self.results.is_empty() {
+            return;
+        }
+
+        let current_id = self.selected_result.unwrap_or(0);
+        let current_file_idx = current_id / 10000;
+
+        if current_file_idx < self.results.len() && !self.results[current_file_idx].matches.is_empty() {
+            let last_match_idx = self.results[current_file_idx].matches.len() - 1;
+            let result_id = current_file_idx * 10000 + last_match_idx;
+            let file_path = self.results[current_file_idx].file_path.clone();
+            let line_number = self.results[current_file_idx].matches[last_match_idx].line_number;
+            self.select_match_with_keyboard(result_id, &file_path, line_number);
+        }
+    }
+
+    fn select_next_file(&mut self) {
+        if self.results.is_empty() {
+            return;
+        }
+
+        let current_id = self.selected_result.unwrap_or(0);
+        let current_file_idx = current_id / 10000;
+
+        // Move to first match in next file
+        for file_idx in (current_file_idx + 1)..self.results.len() {
+            if !self.results[file_idx].matches.is_empty() {
+                let next_id = file_idx * 10000;
+                let file_path = self.results[file_idx].file_path.clone();
+                let line_number = self.results[file_idx].matches[0].line_number;
+                self.select_match_with_keyboard(next_id, &file_path, line_number);
+                return;
+            }
+        }
+
+        // Wrap to first file
+        for file_idx in 0..self.results.len() {
+            if !self.results[file_idx].matches.is_empty() {
+                let next_id = file_idx * 10000;
+                let file_path = self.results[file_idx].file_path.clone();
+                let line_number = self.results[file_idx].matches[0].line_number;
+                self.select_match_with_keyboard(next_id, &file_path, line_number);
+                return;
+            }
+        }
+    }
+
+    fn select_previous_file(&mut self) {
+        if self.results.is_empty() {
+            return;
+        }
+
+        let current_id = self.selected_result.unwrap_or(0);
+        let current_file_idx = current_id / 10000;
+
+        // Move to first match in previous file
+        for file_idx in (0..current_file_idx).rev() {
+            if !self.results[file_idx].matches.is_empty() {
+                let prev_id = file_idx * 10000;
+                let file_path = self.results[file_idx].file_path.clone();
+                let line_number = self.results[file_idx].matches[0].line_number;
+                self.select_match_with_keyboard(prev_id, &file_path, line_number);
+                return;
+            }
+        }
+
+        // Wrap to last file
+        for file_idx in (0..self.results.len()).rev() {
+            if !self.results[file_idx].matches.is_empty() {
+                let prev_id = file_idx * 10000;
+                let file_path = self.results[file_idx].file_path.clone();
+                let line_number = self.results[file_idx].matches[0].line_number;
+                self.select_match_with_keyboard(prev_id, &file_path, line_number);
                 return;
             }
         }
