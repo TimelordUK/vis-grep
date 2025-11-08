@@ -4,10 +4,12 @@ use log::info;
 use std::collections::HashMap;
 use std::time::Instant;
 
+mod config;
 mod input_handler;
 mod preview;
 mod search;
 
+use config::Config;
 use input_handler::{InputHandler, NavigationCommand};
 use preview::FilePreview;
 use search::{SearchEngine, SearchResult};
@@ -42,6 +44,9 @@ struct VisGrepApp {
 
     // FIX message highlighting pattern
     fix_highlight_pattern: String,
+
+    // Configuration
+    config: Config,
 }
 
 impl Default for VisGrepApp {
@@ -79,6 +84,8 @@ impl Default for VisGrepApp {
             marks: HashMap::new(),
 
             fix_highlight_pattern: String::new(),
+
+            config: Config::load(),
         }
     }
 }
@@ -193,6 +200,19 @@ impl eframe::App for VisGrepApp {
             ui.horizontal(|ui| {
                 ui.label("Search Path:");
                 ui.add(egui::TextEdit::singleline(&mut self.search_path).desired_width(350.0));
+
+                // Preset folders dropdown
+                egui::ComboBox::from_id_salt("folder_presets")
+                    .selected_text("📁")
+                    .width(40.0)
+                    .show_ui(ui, |ui| {
+                        for preset in &self.config.folder_presets {
+                            if ui.selectable_label(false, &preset.name).clicked() {
+                                self.search_path = Self::expand_tilde(&preset.path);
+                                info!("Selected preset: {} -> {}", preset.name, self.search_path);
+                            }
+                        }
+                    });
 
                 if ui.button("Current Dir").clicked() {
                     if let Ok(cwd) = std::env::current_dir() {

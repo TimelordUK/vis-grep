@@ -15,3 +15,5 @@ env_logger = "0.11"
 log = "0.4"
 arboard = "3.4"  # Clipboard support
 rfd = "0.15"     # Native file/folder dialogs
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
