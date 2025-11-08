@@ -15,6 +15,7 @@ struct VisGrepApp {
     case_sensitive: bool,
     use_regex: bool,
     recursive: bool,
+    file_age_hours: Option<u64>,
 
     search_engine: SearchEngine,
     results: Vec<SearchResult>,
@@ -22,6 +23,12 @@ struct VisGrepApp {
     preview: FilePreview,
 
     searching: bool,
+
+    // UI state
+    results_filter: String,
+    expand_all: bool,
+    last_search_time: Instant,
+    pending_search: bool,
 }
 
 impl Default for VisGrepApp {
@@ -36,6 +43,7 @@ impl Default for VisGrepApp {
             case_sensitive: false,
             use_regex: true,
             recursive: true,
+            file_age_hours: None,
 
             search_engine: SearchEngine::new(),
             results: Vec::new(),
@@ -43,15 +51,21 @@ impl Default for VisGrepApp {
             preview: FilePreview::new(),
 
             searching: false,
+
+            results_filter: String::new(),
+            expand_all: true,
+            last_search_time: Instant::now(),
+            pending_search: false,
         }
     }
 }
 
 impl VisGrepApp {
     fn perform_search(&mut self) {
-        info!("Starting search: path='{}', pattern='{}', query='{}'",
-              &self.search_path, &self.file_pattern, &self.search_query);
+        info!("Starting search: path='{}', pattern='{}', query='{}', file_age={:?}hrs",
+              &self.search_path, &self.file_pattern, &self.search_query, &self.file_age_hours);
         self.searching = true;
+        self.pending_search = false;
         let start = Instant::now();
         self.results = self.search_engine.search(
             &self.search_path,
@@ -60,6 +74,7 @@ impl VisGrepApp {
             self.case_sensitive,
             self.use_regex,
             self.recursive,
+            self.file_age_hours,
         );
         let duration = start.elapsed();
         info!("Search completed in {:.2}s: found {} matches in {} files",
@@ -68,6 +83,7 @@ impl VisGrepApp {
               self.results.len());
         self.searching = false;
         self.selected_result = None;
+        self.last_search_time = Instant::now();
     }
 }
 
@@ -95,8 +111,14 @@ impl eframe::App for VisGrepApp {
             ui.horizontal(|ui| {
                 ui.label("Search Query:");
                 let response = ui.add(
-                    egui::TextEdit::singleline(&mut self.search_query).desired_width(400.0)
+                    egui::TextEdit::singleline(&mut self.search_query).desired_width(300.0)
                 );
+
+                // Debounced auto-search: trigger search 500ms after typing stops
+                if response.changed() {
+                    self.pending_search = true;
+                    self.last_search_time = Instant::now();
+                }
 
                 if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     if !self.search_query.is_empty() {
@@ -113,15 +135,65 @@ impl eframe::App for VisGrepApp {
                 }
             });
 
+            // File age filter
+            ui.horizontal(|ui| {
+                ui.label("File Age:");
+                let mut enabled = self.file_age_hours.is_some();
+                ui.checkbox(&mut enabled, "Only files modified in last");
+
+                if enabled && self.file_age_hours.is_none() {
+                    self.file_age_hours = Some(24);
+                } else if !enabled {
+                    self.file_age_hours = None;
+                }
+
+                if let Some(ref mut hours) = self.file_age_hours {
+                    ui.add(egui::DragValue::new(hours).suffix(" hours").speed(1.0).clamp_range(1..=8760));
+                }
+            });
+
             ui.separator();
 
-            // Results count
+            // Check for debounced search
+            if self.pending_search && !self.search_query.is_empty() {
+                let elapsed = self.last_search_time.elapsed();
+                if elapsed.as_millis() > 500 {
+                    self.perform_search();
+                } else {
+                    // Request repaint to check again
+                    ctx.request_repaint();
+                }
+            }
+
+            // Results controls and filter
             if !self.results.is_empty() {
-                ui.label(format!(
-                    "Found {} matches in {} files",
-                    self.results.iter().map(|r| r.matches.len()).sum::<usize>(),
-                    self.results.len()
-                ));
+                ui.horizontal(|ui| {
+                    ui.label(format!(
+                        "Found {} matches in {} files",
+                        self.results.iter().map(|r| r.matches.len()).sum::<usize>(),
+                        self.results.len()
+                    ));
+
+                    ui.separator();
+
+                    ui.label("Filter results:");
+                    ui.add(egui::TextEdit::singleline(&mut self.results_filter)
+                        .hint_text("filename filter...")
+                        .desired_width(150.0));
+
+                    if ui.small_button("Clear").clicked() {
+                        self.results_filter.clear();
+                    }
+
+                    ui.separator();
+
+                    if ui.button("Expand All").clicked() {
+                        self.expand_all = true;
+                    }
+                    if ui.button("Collapse All").clicked() {
+                        self.expand_all = false;
+                    }
+                });
                 ui.separator();
             }
 
@@ -156,13 +228,22 @@ impl eframe::App for VisGrepApp {
 
 impl VisGrepApp {
     fn render_results(&mut self, ui: &mut egui::Ui) {
+        let filter = self.results_filter.to_lowercase();
+
         for (file_idx, result) in self.results.iter().enumerate() {
             let file_name = result.file_path.file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("unknown");
 
+            // Apply filename filter
+            if !filter.is_empty() && !file_name.to_lowercase().contains(&filter) {
+                continue;
+            }
+
+            let header_id = ui.make_persistent_id(format!("header_{}", file_idx));
             egui::CollapsingHeader::new(format!("{} ({} matches)", file_name, result.matches.len()))
-                .default_open(true)
+                .id_source(header_id)
+                .default_open(self.expand_all)
                 .show(ui, |ui| {
                     for (match_idx, m) in result.matches.iter().enumerate() {
                         let result_id = file_idx * 10000 + match_idx;

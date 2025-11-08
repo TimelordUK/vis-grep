@@ -2,6 +2,7 @@ use regex::Regex;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, Duration};
 use walkdir::WalkDir;
 use rayon::prelude::*;
 
@@ -34,11 +35,16 @@ impl SearchEngine {
         case_sensitive: bool,
         use_regex: bool,
         recursive: bool,
+        file_age_hours: Option<u64>,
     ) -> Vec<SearchResult> {
         let path = Path::new(search_path);
         if !path.exists() {
             return Vec::new();
         }
+
+        let age_cutoff = file_age_hours.map(|hours| {
+            SystemTime::now() - Duration::from_secs(hours * 3600)
+        });
 
         // Collect files matching the pattern
         let files: Vec<PathBuf> = if path.is_file() {
@@ -50,6 +56,7 @@ impl SearchEngine {
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().is_file())
                 .filter(|e| self.matches_pattern(e.path(), file_pattern))
+                .filter(|e| self.matches_age(e.path(), age_cutoff))
                 .map(|e| e.path().to_path_buf())
                 .collect()
         } else {
@@ -60,6 +67,7 @@ impl SearchEngine {
                         .filter_map(|e| e.ok())
                         .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
                         .filter(|e| self.matches_pattern(&e.path(), file_pattern))
+                        .filter(|e| self.matches_age(&e.path(), age_cutoff))
                         .map(|e| e.path())
                         .collect()
                 })
@@ -94,6 +102,21 @@ impl SearchEngine {
             .ok()
             .and_then(|re| Some(re.is_match(file_name)))
             .unwrap_or(false)
+    }
+
+    fn matches_age(&self, path: &Path, cutoff: Option<SystemTime>) -> bool {
+        let Some(cutoff_time) = cutoff else {
+            return true; // No age filter
+        };
+
+        // Check file modification time
+        if let Ok(metadata) = std::fs::metadata(path) {
+            if let Ok(modified) = metadata.modified() {
+                return modified >= cutoff_time;
+            }
+        }
+
+        false // If we can't get metadata, exclude the file
     }
 
     fn search_file(
