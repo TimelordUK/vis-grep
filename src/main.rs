@@ -247,6 +247,12 @@ struct LogLine {
     content: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PreviewMode {
+    Following,  // Auto-scroll to bottom, show last N lines
+    Paused,     // Manual navigation
+}
+
 struct TailState {
     // Files being monitored
     files: Vec<TailedFile>,
@@ -273,6 +279,14 @@ struct TailState {
 
     // Performance tuning
     max_lines_per_poll: usize,
+
+    // Preview pane
+    preview_selected_file: Option<usize>,
+    preview_mode: PreviewMode,
+    preview_scroll_offset: f32,
+    preview_follow_lines: usize,
+    preview_content: Vec<String>,
+    preview_needs_reload: bool,
 }
 
 impl TailState {
@@ -290,6 +304,12 @@ impl TailState {
             total_lines_received: 0,
             lines_dropped: 0,
             max_lines_per_poll: 100,
+            preview_selected_file: None,
+            preview_mode: PreviewMode::Following,
+            preview_scroll_offset: 0.0,
+            preview_follow_lines: 100,
+            preview_content: Vec::new(),
+            preview_needs_reload: false,
         }
     }
 
@@ -474,6 +494,58 @@ impl VisGrepApp {
                     info!("Error reading {}: {}", file.display_name, e);
                 }
             }
+        }
+
+        // Reload preview if needed
+        if self.tail_state.preview_needs_reload {
+            self.reload_tail_preview();
+        }
+    }
+
+    fn reload_tail_preview(&mut self) {
+        if let Some(file_idx) = self.tail_state.preview_selected_file {
+            if file_idx < self.tail_state.files.len() {
+                let file = &self.tail_state.files[file_idx];
+
+                match self.read_file_for_preview(&file.path) {
+                    Ok(lines) => {
+                        self.tail_state.preview_content = lines;
+                        self.tail_state.preview_needs_reload = false;
+                    }
+                    Err(e) => {
+                        info!("Error loading preview for {}: {}", file.display_name, e);
+                        self.tail_state.preview_content = vec![format!("Error: {}", e)];
+                    }
+                }
+            }
+        }
+    }
+
+    fn read_file_for_preview(&self, path: &PathBuf) -> std::io::Result<Vec<String>> {
+        use std::io::{BufRead, BufReader};
+
+        if self.tail_state.preview_mode == PreviewMode::Following {
+            // Read last N lines efficiently
+            let file = File::open(path)?;
+            let reader = BufReader::new(file);
+
+            let mut lines: VecDeque<String> = VecDeque::with_capacity(self.tail_state.preview_follow_lines);
+
+            for line in reader.lines() {
+                if let Ok(line_str) = line {
+                    if lines.len() >= self.tail_state.preview_follow_lines {
+                        lines.pop_front();
+                    }
+                    lines.push_back(line_str);
+                }
+            }
+
+            Ok(lines.into_iter().collect())
+        } else {
+            // Read entire file for paused mode
+            let file = File::open(path)?;
+            let reader = BufReader::new(file);
+            reader.lines().collect()
         }
     }
 }
@@ -1344,10 +1416,12 @@ impl VisGrepApp {
                             };
                             ui.colored_label(color, indicator);
 
-                            // Filename
-                            let selected = self.tail_state.selected_file_index == Some(idx);
+                            // Filename (selectable for preview)
+                            let selected = self.tail_state.preview_selected_file == Some(idx);
                             if ui.selectable_label(selected, &file.display_name).clicked() {
-                                self.tail_state.selected_file_index = Some(idx);
+                                self.tail_state.preview_selected_file = Some(idx);
+                                self.tail_state.preview_needs_reload = true;
+                                self.tail_state.preview_mode = PreviewMode::Following;
                             }
 
                             // Size
