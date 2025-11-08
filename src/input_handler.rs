@@ -11,18 +11,18 @@ pub enum NavigationCommand {
     PreviousMatchWithCount(usize),
 
     // File-level navigation
-    FirstMatchInCurrentFile,   // ^ - jump to first match in current file
-    LastMatchInCurrentFile,    // $ - jump to last match in current file
-    NextFile,                  // N - jump to first match in next file
-    PreviousFile,              // P - jump to first match in previous file
-    NextFileWithCount(usize),  // 2N - jump forward 2 files
+    FirstMatchInCurrentFile,      // ^ - jump to first match in current file
+    LastMatchInCurrentFile,       // $ - jump to last match in current file
+    NextFile,                     // N - jump to first match in next file
+    PreviousFile,                 // P - jump to first match in previous file
+    NextFileWithCount(usize),     // 2N - jump forward 2 files
     PreviousFileWithCount(usize), // 2P - jump backward 2 files
 
     // Clipboard operations
-    YankMatchedLine,           // yy - yank (copy) matched line to clipboard
+    YankMatchedLine, // yy - yank (copy) matched line to clipboard
 
     // File operations
-    OpenInExplorer,            // gf - open file in explorer/finder
+    OpenInExplorer, // gf - open file in explorer/finder
 }
 
 pub struct InputHandler {
@@ -46,14 +46,22 @@ impl InputHandler {
         ctx.input(|i| {
             // Check for special shift+number combos FIRST (before digit processing)
             // '^' - first match in current file (Shift+6)
-            if i.key_pressed(egui::Key::Num6) && i.modifiers.shift && !i.modifiers.ctrl && !i.modifiers.alt {
+            if i.key_pressed(egui::Key::Num6)
+                && i.modifiers.shift
+                && !i.modifiers.ctrl
+                && !i.modifiers.alt
+            {
                 info!("Command: ^ (first match in current file)");
                 command = Some(NavigationCommand::FirstMatchInCurrentFile);
                 self.reset();
                 return;
             }
             // '$' - last match in current file (Shift+4)
-            if i.key_pressed(egui::Key::Num4) && i.modifiers.shift && !i.modifiers.ctrl && !i.modifiers.alt {
+            if i.key_pressed(egui::Key::Num4)
+                && i.modifiers.shift
+                && !i.modifiers.ctrl
+                && !i.modifiers.alt
+            {
                 info!("Command: $ (last match in current file)");
                 command = Some(NavigationCommand::LastMatchInCurrentFile);
                 self.reset();
@@ -61,7 +69,11 @@ impl InputHandler {
             }
 
             // 'y' - start of yank sequence (yy = yank matched line)
-            if i.key_pressed(egui::Key::Y) && !i.modifiers.shift && !i.modifiers.ctrl && !i.modifiers.alt {
+            if i.key_pressed(egui::Key::Y)
+                && !i.modifiers.shift
+                && !i.modifiers.ctrl
+                && !i.modifiers.alt
+            {
                 if self.pending_keys == "y" {
                     // Second 'y' - yank matched line
                     info!("Command: yy (yank matched line)");
@@ -79,11 +91,22 @@ impl InputHandler {
             // Check for digit keys to build up count (e.g., "3n" -> move 3 times)
             // Only process if shift is NOT pressed (to avoid conflicts with ^ and $)
             for key in &[
-                egui::Key::Num0, egui::Key::Num1, egui::Key::Num2, egui::Key::Num3,
-                egui::Key::Num4, egui::Key::Num5, egui::Key::Num6, egui::Key::Num7,
-                egui::Key::Num8, egui::Key::Num9,
+                egui::Key::Num0,
+                egui::Key::Num1,
+                egui::Key::Num2,
+                egui::Key::Num3,
+                egui::Key::Num4,
+                egui::Key::Num5,
+                egui::Key::Num6,
+                egui::Key::Num7,
+                egui::Key::Num8,
+                egui::Key::Num9,
             ] {
-                if i.key_pressed(*key) && !i.modifiers.shift && !i.modifiers.ctrl && !i.modifiers.alt {
+                if i.key_pressed(*key)
+                    && !i.modifiers.shift
+                    && !i.modifiers.ctrl
+                    && !i.modifiers.alt
+                {
                     let digit = match key {
                         egui::Key::Num0 => '0',
                         egui::Key::Num1 => '1',
@@ -172,7 +195,11 @@ impl InputHandler {
                 }
             }
             // 'f' - could be part of 'gf' sequence
-            else if i.key_pressed(egui::Key::F) && !i.modifiers.ctrl && !i.modifiers.alt && !i.modifiers.shift {
+            else if i.key_pressed(egui::Key::F)
+                && !i.modifiers.ctrl
+                && !i.modifiers.alt
+                && !i.modifiers.shift
+            {
                 if self.pending_keys == "g" {
                     // 'gf' - open file in explorer
                     info!("Command: gf (open in explorer)");

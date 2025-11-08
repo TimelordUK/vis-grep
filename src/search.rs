@@ -1,10 +1,10 @@
+use rayon::prelude::*;
 use regex::Regex;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, Duration};
+use std::time::{Duration, SystemTime};
 use walkdir::WalkDir;
-use rayon::prelude::*;
 
 #[derive(Debug, Clone)]
 pub struct MatchInfo {
@@ -42,9 +42,8 @@ impl SearchEngine {
             return Vec::new();
         }
 
-        let age_cutoff = file_age_hours.map(|hours| {
-            SystemTime::now() - Duration::from_secs(hours * 3600)
-        });
+        let age_cutoff =
+            file_age_hours.map(|hours| SystemTime::now() - Duration::from_secs(hours * 3600));
 
         // Collect files matching the pattern
         let files: Vec<PathBuf> = if path.is_file() {

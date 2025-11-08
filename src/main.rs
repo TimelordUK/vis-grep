@@ -4,13 +4,13 @@ use log::info;
 use std::collections::HashMap;
 use std::time::Instant;
 
-mod search;
-mod preview;
 mod input_handler;
+mod preview;
+mod search;
 
-use search::{SearchEngine, SearchResult};
-use preview::FilePreview;
 use input_handler::{InputHandler, NavigationCommand};
+use preview::FilePreview;
+use search::{SearchEngine, SearchResult};
 
 struct VisGrepApp {
     search_path: String,
@@ -76,8 +76,10 @@ impl Default for VisGrepApp {
 
 impl VisGrepApp {
     fn perform_search(&mut self) {
-        info!("Starting search: path='{}', pattern='{}', query='{}', file_age={:?}hrs",
-              &self.search_path, &self.file_pattern, &self.search_query, &self.file_age_hours);
+        info!(
+            "Starting search: path='{}', pattern='{}', query='{}', file_age={:?}hrs",
+            &self.search_path, &self.file_pattern, &self.search_query, &self.file_age_hours
+        );
         self.searching = true;
         self.pending_search = false;
         let start = Instant::now();
@@ -91,10 +93,12 @@ impl VisGrepApp {
             self.file_age_hours,
         );
         let duration = start.elapsed();
-        info!("Search completed in {:.2}s: found {} matches in {} files",
-              duration.as_secs_f64(),
-              self.results.iter().map(|r| r.matches.len()).sum::<usize>(),
-              self.results.len());
+        info!(
+            "Search completed in {:.2}s: found {} matches in {} files",
+            duration.as_secs_f64(),
+            self.results.iter().map(|r| r.matches.len()).sum::<usize>(),
+            self.results.len()
+        );
         self.searching = false;
         self.selected_result = None;
         self.last_search_time = Instant::now();
@@ -163,9 +167,8 @@ impl eframe::App for VisGrepApp {
             // Search query
             ui.horizontal(|ui| {
                 ui.label("Search Query:");
-                let response = ui.add(
-                    egui::TextEdit::singleline(&mut self.search_query).desired_width(300.0)
-                );
+                let response =
+                    ui.add(egui::TextEdit::singleline(&mut self.search_query).desired_width(300.0));
 
                 // Debounced auto-search: trigger search 500ms after typing stops
                 if response.changed() {
@@ -201,7 +204,12 @@ impl eframe::App for VisGrepApp {
                 }
 
                 if let Some(ref mut hours) = self.file_age_hours {
-                    ui.add(egui::DragValue::new(hours).suffix(" hours").speed(1.0).clamp_range(1..=8760));
+                    ui.add(
+                        egui::DragValue::new(hours)
+                            .suffix(" hours")
+                            .speed(1.0)
+                            .clamp_range(1..=8760),
+                    );
                 }
             });
 
@@ -230,9 +238,11 @@ impl eframe::App for VisGrepApp {
                     ui.separator();
 
                     ui.label("Filter results:");
-                    ui.add(egui::TextEdit::singleline(&mut self.results_filter)
-                        .hint_text("filename filter...")
-                        .desired_width(150.0));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.results_filter)
+                            .hint_text("filename filter...")
+                            .desired_width(150.0),
+                    );
 
                     if ui.small_button("Clear").clicked() {
                         self.results_filter.clear();
@@ -241,14 +251,20 @@ impl eframe::App for VisGrepApp {
                     ui.separator();
 
                     if ui.button("Expand All").clicked() {
-                        info!("Expand All clicked - expanding {} results", self.results.len());
+                        info!(
+                            "Expand All clicked - expanding {} results",
+                            self.results.len()
+                        );
                         for i in 0..self.results.len() {
                             self.collapsing_state.insert(i, true);
                         }
                         info!("Collapsing state: {:?}", self.collapsing_state);
                     }
                     if ui.button("Collapse All").clicked() {
-                        info!("Collapse All clicked - collapsing {} results", self.results.len());
+                        info!(
+                            "Collapse All clicked - collapsing {} results",
+                            self.results.len()
+                        );
                         for i in 0..self.results.len() {
                             self.collapsing_state.insert(i, false);
                         }
@@ -294,12 +310,10 @@ impl eframe::App for VisGrepApp {
                     if ui.button("Copy All to Clipboard").clicked() {
                         if let Some(content) = &self.preview.content {
                             match Clipboard::new() {
-                                Ok(mut clipboard) => {
-                                    match clipboard.set_text(content.clone()) {
-                                        Ok(_) => info!("Copied {} chars to clipboard", content.len()),
-                                        Err(e) => info!("Failed to copy to clipboard: {}", e),
-                                    }
-                                }
+                                Ok(mut clipboard) => match clipboard.set_text(content.clone()) {
+                                    Ok(_) => info!("Copied {} chars to clipboard", content.len()),
+                                    Err(e) => info!("Failed to copy to clipboard: {}", e),
+                                },
                                 Err(e) => info!("Failed to access clipboard: {}", e),
                             }
                         }
@@ -313,8 +327,13 @@ impl eframe::App for VisGrepApp {
                             match Clipboard::new() {
                                 Ok(mut clipboard) => {
                                     match clipboard.set_text(matched_line.clone()) {
-                                        Ok(_) => info!("Copied matched line ({} chars) to clipboard", matched_line.len()),
-                                        Err(e) => info!("Failed to copy matched line to clipboard: {}", e),
+                                        Ok(_) => info!(
+                                            "Copied matched line ({} chars) to clipboard",
+                                            matched_line.len()
+                                        ),
+                                        Err(e) => {
+                                            info!("Failed to copy matched line to clipboard: {}", e)
+                                        }
                                     }
                                 }
                                 Err(e) => info!("Failed to access clipboard: {}", e),
@@ -334,7 +353,8 @@ impl eframe::App for VisGrepApp {
 
             // Only force scroll position when a new match is selected
             if self.should_scroll_to_match {
-                scroll_area = scroll_area.scroll_offset(egui::Vec2::new(0.0, self.preview_scroll_offset));
+                scroll_area =
+                    scroll_area.scroll_offset(egui::Vec2::new(0.0, self.preview_scroll_offset));
                 self.should_scroll_to_match = false; // Reset flag after applying
             }
 
@@ -346,7 +366,12 @@ impl eframe::App for VisGrepApp {
 }
 
 impl VisGrepApp {
-    fn select_match(&mut self, result_id: usize, file_path: &std::path::PathBuf, line_number: usize) {
+    fn select_match(
+        &mut self,
+        result_id: usize,
+        file_path: &std::path::PathBuf,
+        line_number: usize,
+    ) {
         self.selected_result = Some(result_id);
         self.preview.load_file(file_path, line_number);
 
@@ -362,7 +387,12 @@ impl VisGrepApp {
         }
     }
 
-    fn select_match_with_keyboard(&mut self, result_id: usize, file_path: &std::path::PathBuf, line_number: usize) {
+    fn select_match_with_keyboard(
+        &mut self,
+        result_id: usize,
+        file_path: &std::path::PathBuf,
+        line_number: usize,
+    ) {
         self.select_match(result_id, file_path, line_number);
         self.scroll_to_selected_result = true; // Flag to scroll results panel
     }
@@ -381,7 +411,8 @@ impl VisGrepApp {
             if current_match_idx + 1 < self.results[current_file_idx].matches.len() {
                 let next_id = current_file_idx * 10000 + current_match_idx + 1;
                 let file_path = self.results[current_file_idx].file_path.clone();
-                let line_number = self.results[current_file_idx].matches[current_match_idx + 1].line_number;
+                let line_number =
+                    self.results[current_file_idx].matches[current_match_idx + 1].line_number;
                 self.select_match_with_keyboard(next_id, &file_path, line_number);
                 return;
             }
@@ -528,12 +559,13 @@ impl VisGrepApp {
     fn yank_matched_line(&mut self) {
         if let Some(matched_line) = &self.preview.matched_line_text {
             match Clipboard::new() {
-                Ok(mut clipboard) => {
-                    match clipboard.set_text(matched_line.clone()) {
-                        Ok(_) => info!("Yanked matched line ({} chars) to clipboard", matched_line.len()),
-                        Err(e) => info!("Failed to yank matched line to clipboard: {}", e),
-                    }
-                }
+                Ok(mut clipboard) => match clipboard.set_text(matched_line.clone()) {
+                    Ok(_) => info!(
+                        "Yanked matched line ({} chars) to clipboard",
+                        matched_line.len()
+                    ),
+                    Err(e) => info!("Failed to yank matched line to clipboard: {}", e),
+                },
                 Err(e) => info!("Failed to access clipboard: {}", e),
             }
         } else {
@@ -584,7 +616,9 @@ impl VisGrepApp {
         let current_id = self.selected_result.unwrap_or(0);
         let current_file_idx = current_id / 10000;
 
-        if current_file_idx < self.results.len() && !self.results[current_file_idx].matches.is_empty() {
+        if current_file_idx < self.results.len()
+            && !self.results[current_file_idx].matches.is_empty()
+        {
             let result_id = current_file_idx * 10000;
             let file_path = self.results[current_file_idx].file_path.clone();
             let line_number = self.results[current_file_idx].matches[0].line_number;
@@ -600,7 +634,9 @@ impl VisGrepApp {
         let current_id = self.selected_result.unwrap_or(0);
         let current_file_idx = current_id / 10000;
 
-        if current_file_idx < self.results.len() && !self.results[current_file_idx].matches.is_empty() {
+        if current_file_idx < self.results.len()
+            && !self.results[current_file_idx].matches.is_empty()
+        {
             let last_match_idx = self.results[current_file_idx].matches.len() - 1;
             let result_id = current_file_idx * 10000 + last_match_idx;
             let file_path = self.results[current_file_idx].file_path.clone();
@@ -684,7 +720,8 @@ impl VisGrepApp {
         if current_match_idx > 0 {
             let prev_id = current_file_idx * 10000 + current_match_idx - 1;
             let file_path = self.results[current_file_idx].file_path.clone();
-            let line_number = self.results[current_file_idx].matches[current_match_idx - 1].line_number;
+            let line_number =
+                self.results[current_file_idx].matches[current_match_idx - 1].line_number;
             self.select_match_with_keyboard(prev_id, &file_path, line_number);
             return;
         }
@@ -721,7 +758,9 @@ impl VisGrepApp {
         self.scroll_to_selected_result = false; // Reset flag
 
         for (file_idx, result) in self.results.iter().enumerate() {
-            let file_name = result.file_path.file_name()
+            let file_name = result
+                .file_path
+                .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("unknown");
 
@@ -763,7 +802,8 @@ impl VisGrepApp {
                         let response = ui.selectable_label(is_selected, label);
 
                         if response.clicked() {
-                            clicked_match = Some((result_id, result.file_path.clone(), m.line_number));
+                            clicked_match =
+                                Some((result_id, result.file_path.clone(), m.line_number));
                         }
 
                         // Scroll to this item if it's selected and we should scroll
@@ -779,7 +819,8 @@ impl VisGrepApp {
                 header_id,
                 is_open,
             );
-            self.collapsing_state.insert(file_idx, updated_state.is_open());
+            self.collapsing_state
+                .insert(file_idx, updated_state.is_open());
         }
 
         // Handle match selection after iteration is complete
@@ -793,7 +834,8 @@ impl VisGrepApp {
             // Check if we should try syntax highlighting based on selected result
             let should_highlight = if let Some(selected_id) = self.selected_result {
                 let file_idx = selected_id / 10000;
-                self.results.get(file_idx)
+                self.results
+                    .get(file_idx)
                     .map(|r| self.should_highlight_file(&r.file_path))
                     .unwrap_or(false)
             } else {
@@ -806,9 +848,12 @@ impl VisGrepApp {
                     let mut layout_job = egui_extras::syntax_highlighting::highlight(
                         ui.ctx(),
                         ui.style().as_ref(),
-                        &egui_extras::syntax_highlighting::CodeTheme::from_memory(ui.ctx(), ui.style().as_ref()),
+                        &egui_extras::syntax_highlighting::CodeTheme::from_memory(
+                            ui.ctx(),
+                            ui.style().as_ref(),
+                        ),
                         string,
-                        "rs" // Default to rust, we can make this smarter later
+                        "rs", // Default to rust, we can make this smarter later
                     );
                     layout_job.wrap.max_width = wrap_width;
                     ui.fonts(|f| f.layout_job(layout_job))
@@ -819,7 +864,7 @@ impl VisGrepApp {
                         .code_editor()
                         .desired_width(f32::INFINITY)
                         .desired_rows(100)
-                        .layouter(&mut layouter)
+                        .layouter(&mut layouter),
                 );
             } else {
                 // Plain text for non-code files
@@ -827,7 +872,7 @@ impl VisGrepApp {
                     egui::TextEdit::multiline(&mut preview_text.as_str())
                         .code_editor()
                         .desired_width(f32::INFINITY)
-                        .desired_rows(100)
+                        .desired_rows(100),
                 );
             }
         } else {
@@ -839,9 +884,34 @@ impl VisGrepApp {
         if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
             matches!(
                 ext,
-                "rs" | "toml" | "js" | "ts" | "tsx" | "jsx" | "py" | "java" | "c" | "cpp" | "h" | "hpp"
-                    | "go" | "rb" | "php" | "cs" | "swift" | "kt" | "scala" | "sh" | "bash" | "json"
-                    | "xml" | "html" | "css" | "md" | "yaml" | "yml" | "sql"
+                "rs" | "toml"
+                    | "js"
+                    | "ts"
+                    | "tsx"
+                    | "jsx"
+                    | "py"
+                    | "java"
+                    | "c"
+                    | "cpp"
+                    | "h"
+                    | "hpp"
+                    | "go"
+                    | "rb"
+                    | "php"
+                    | "cs"
+                    | "swift"
+                    | "kt"
+                    | "scala"
+                    | "sh"
+                    | "bash"
+                    | "json"
+                    | "xml"
+                    | "html"
+                    | "css"
+                    | "md"
+                    | "yaml"
+                    | "yml"
+                    | "sql"
             )
         } else {
             false

@@ -7,7 +7,7 @@ use std::path::Path;
 pub struct FilePreview {
     pub content: Option<String>,
     pub target_line_in_preview: Option<usize>, // Which line in the preview content has the >>>
-    pub matched_line_text: Option<String>, // The actual matched line text (without >>> marker)
+    pub matched_line_text: Option<String>,     // The actual matched line text (without >>> marker)
 }
 
 impl FilePreview {
@@ -29,8 +29,10 @@ impl FilePreview {
         match self.load_preview_fast(path, target_line) {
             Ok((text, preview_line, matched_text)) => {
                 let total_lines = text.lines().count();
-                info!("Preview loaded: target_line={}, preview_line_index={}, total_preview_lines={}",
-                      target_line, preview_line, total_lines);
+                info!(
+                    "Preview loaded: target_line={}, preview_line_index={}, total_preview_lines={}",
+                    target_line, preview_line, total_lines
+                );
                 self.content = Some(text);
                 self.target_line_in_preview = Some(preview_line);
                 self.matched_line_text = Some(matched_text);
@@ -47,7 +49,11 @@ impl FilePreview {
     /// Fast preview loading using buffered reading
     /// Shows context_lines before and after the target line
     /// Returns (preview_text, line_number_in_preview_where_target_is, matched_line_text)
-    fn load_preview_fast(&self, path: &Path, target_line: usize) -> std::io::Result<(String, usize, String)> {
+    fn load_preview_fast(
+        &self,
+        path: &Path,
+        target_line: usize,
+    ) -> std::io::Result<(String, usize, String)> {
         let context_lines = 50; // Show 50 lines before and after for better context
         let start_line = target_line.saturating_sub(context_lines);
         let end_line = target_line + context_lines;
@@ -89,7 +95,12 @@ impl FilePreview {
         self.load_preview_mmap(path, target_line, context_lines)
     }
 
-    fn load_preview_mmap(&self, path: &Path, target_line: usize, context_lines: usize) -> std::io::Result<(String, usize, String)> {
+    fn load_preview_mmap(
+        &self,
+        path: &Path,
+        target_line: usize,
+        context_lines: usize,
+    ) -> std::io::Result<(String, usize, String)> {
         let file = File::open(path)?;
         let mmap = unsafe { Mmap::map(&file)? };
 
