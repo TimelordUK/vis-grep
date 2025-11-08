@@ -7,6 +7,7 @@ use std::path::Path;
 pub struct FilePreview {
     pub content: Option<String>,
     pub target_line_in_preview: Option<usize>, // Which line in the preview content has the >>>
+    pub matched_line_text: Option<String>, // The actual matched line text (without >>> marker)
 }
 
 impl FilePreview {
@@ -14,6 +15,7 @@ impl FilePreview {
         Self {
             content: None,
             target_line_in_preview: None,
+            matched_line_text: None,
         }
     }
 
@@ -22,27 +24,30 @@ impl FilePreview {
     pub fn load_file(&mut self, path: &Path, target_line: usize) {
         self.content = None;
         self.target_line_in_preview = None;
+        self.matched_line_text = None;
 
         match self.load_preview_fast(path, target_line) {
-            Ok((text, preview_line)) => {
+            Ok((text, preview_line, matched_text)) => {
                 let total_lines = text.lines().count();
                 info!("Preview loaded: target_line={}, preview_line_index={}, total_preview_lines={}",
                       target_line, preview_line, total_lines);
                 self.content = Some(text);
                 self.target_line_in_preview = Some(preview_line);
+                self.matched_line_text = Some(matched_text);
             }
             Err(e) => {
                 info!("Error loading preview for {:?}: {}", path, e);
                 self.content = Some(format!("Error loading preview for {:?}", path));
                 self.target_line_in_preview = None;
+                self.matched_line_text = None;
             }
         }
     }
 
     /// Fast preview loading using buffered reading
     /// Shows context_lines before and after the target line
-    /// Returns (preview_text, line_number_in_preview_where_target_is)
-    fn load_preview_fast(&self, path: &Path, target_line: usize) -> std::io::Result<(String, usize)> {
+    /// Returns (preview_text, line_number_in_preview_where_target_is, matched_line_text)
+    fn load_preview_fast(&self, path: &Path, target_line: usize) -> std::io::Result<(String, usize, String)> {
         let context_lines = 50; // Show 50 lines before and after for better context
         let start_line = target_line.saturating_sub(context_lines);
         let end_line = target_line + context_lines;
@@ -56,6 +61,7 @@ impl FilePreview {
             let reader = BufReader::new(file);
             let mut preview_line_idx = 0;
             let mut target_preview_line = 0;
+            let mut matched_line_text = String::new();
 
             let lines: Vec<String> = reader
                 .lines()
@@ -65,6 +71,7 @@ impl FilePreview {
                     line.ok().map(|l| {
                         let formatted = if idx + 1 == target_line {
                             target_preview_line = preview_line_idx;
+                            matched_line_text = l.clone();
                             format!(">>> {:4} | {}", idx + 1, l)
                         } else {
                             format!("    {:4} | {}", idx + 1, l)
@@ -75,14 +82,14 @@ impl FilePreview {
                 })
                 .collect();
 
-            return Ok((lines.join("\n"), target_preview_line));
+            return Ok((lines.join("\n"), target_preview_line, matched_line_text));
         }
 
         // For large files, use memory mapping
         self.load_preview_mmap(path, target_line, context_lines)
     }
 
-    fn load_preview_mmap(&self, path: &Path, target_line: usize, context_lines: usize) -> std::io::Result<(String, usize)> {
+    fn load_preview_mmap(&self, path: &Path, target_line: usize, context_lines: usize) -> std::io::Result<(String, usize, String)> {
         let file = File::open(path)?;
         let mmap = unsafe { Mmap::map(&file)? };
 
@@ -93,6 +100,7 @@ impl FilePreview {
         let mut result = Vec::new();
         let mut line_start = 0;
         let mut target_preview_line = 0;
+        let mut matched_line_text = String::new();
 
         for (pos, &byte) in mmap.iter().enumerate() {
             if byte == b'\n' {
@@ -101,6 +109,7 @@ impl FilePreview {
                     if let Ok(line_str) = std::str::from_utf8(line_bytes) {
                         if current_line == target_line {
                             target_preview_line = result.len();
+                            matched_line_text = line_str.to_string();
                             result.push(format!(">>> {:4} | {}", current_line, line_str));
                         } else {
                             result.push(format!("    {:4} | {}", current_line, line_str));
@@ -117,6 +126,6 @@ impl FilePreview {
             }
         }
 
-        Ok((result.join("\n"), target_preview_line))
+        Ok((result.join("\n"), target_preview_line, matched_line_text))
     }
 }

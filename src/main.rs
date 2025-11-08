@@ -1,3 +1,4 @@
+use arboard::Clipboard;
 use eframe::egui;
 use log::info;
 use std::collections::HashMap;
@@ -5,9 +6,11 @@ use std::time::Instant;
 
 mod search;
 mod preview;
+mod input_handler;
 
 use search::{SearchEngine, SearchResult};
 use preview::FilePreview;
+use input_handler::{InputHandler, NavigationCommand};
 
 struct VisGrepApp {
     search_path: String,
@@ -31,6 +34,10 @@ struct VisGrepApp {
     last_search_time: Instant,
     pending_search: bool,
     preview_scroll_offset: f32,
+    should_scroll_to_match: bool, // Only scroll when a new match is selected
+    scroll_to_selected_result: bool, // Flag to scroll results panel to selected item
+
+    input_handler: InputHandler,
 }
 
 impl Default for VisGrepApp {
@@ -59,6 +66,10 @@ impl Default for VisGrepApp {
             last_search_time: Instant::now(),
             pending_search: false,
             preview_scroll_offset: 0.0,
+            should_scroll_to_match: false,
+            scroll_to_selected_result: false,
+
+            input_handler: InputHandler::new(),
         }
     }
 }
@@ -98,14 +109,47 @@ impl VisGrepApp {
 
 impl eframe::App for VisGrepApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Process keyboard input and handle navigation commands
+        if let Some(command) = self.input_handler.process_input(ctx) {
+            self.handle_navigation_command(command);
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("VisGrep - Fast Search Tool");
+            ui.horizontal(|ui| {
+                ui.heading("VisGrep - Fast Search Tool");
+
+                // Show pending input state (e.g., "3" or "g")
+                let status = self.input_handler.get_status();
+                if !status.is_empty() {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(format!("Command: {}", status));
+                    });
+                }
+            });
             ui.separator();
 
             // Search parameters
             ui.horizontal(|ui| {
                 ui.label("Search Path:");
-                ui.add(egui::TextEdit::singleline(&mut self.search_path).desired_width(400.0));
+                ui.add(egui::TextEdit::singleline(&mut self.search_path).desired_width(350.0));
+
+                if ui.button("Current Dir").clicked() {
+                    if let Ok(cwd) = std::env::current_dir() {
+                        self.search_path = cwd.display().to_string();
+                    }
+                }
+
+                if ui.button("Browse...").clicked() {
+                    match rfd::FileDialog::new().pick_folder() {
+                        Some(path) => {
+                            self.search_path = path.display().to_string();
+                            info!("Selected folder: {}", self.search_path);
+                        }
+                        None => {
+                            info!("Browse dialog cancelled or unavailable");
+                        }
+                    }
+                }
 
                 ui.label("File Pattern:");
                 ui.add(egui::TextEdit::singleline(&mut self.file_pattern).desired_width(150.0));
@@ -235,25 +279,228 @@ impl eframe::App for VisGrepApp {
             ui.separator();
 
             // Preview panel (take remaining space)
-            ui.heading("Preview");
+            ui.horizontal(|ui| {
+                ui.heading("Preview");
+
+                // Add copy to clipboard button if we have content
+                if self.preview.content.is_some() {
+                    if ui.button("Copy All to Clipboard").clicked() {
+                        if let Some(content) = &self.preview.content {
+                            match Clipboard::new() {
+                                Ok(mut clipboard) => {
+                                    match clipboard.set_text(content.clone()) {
+                                        Ok(_) => info!("Copied {} chars to clipboard", content.len()),
+                                        Err(e) => info!("Failed to copy to clipboard: {}", e),
+                                    }
+                                }
+                                Err(e) => info!("Failed to access clipboard: {}", e),
+                            }
+                        }
+                    }
+                }
+
+                // Add copy matched line button if we have a matched line
+                if self.preview.matched_line_text.is_some() {
+                    if ui.button("Copy Matched Line").clicked() {
+                        if let Some(matched_line) = &self.preview.matched_line_text {
+                            match Clipboard::new() {
+                                Ok(mut clipboard) => {
+                                    match clipboard.set_text(matched_line.clone()) {
+                                        Ok(_) => info!("Copied matched line ({} chars) to clipboard", matched_line.len()),
+                                        Err(e) => info!("Failed to copy matched line to clipboard: {}", e),
+                                    }
+                                }
+                                Err(e) => info!("Failed to access clipboard: {}", e),
+                            }
+                        }
+                    }
+                }
+            });
+
             let remaining_height = ui.available_height();
 
-            // Use stored scroll offset
-            egui::ScrollArea::vertical()
+            // Use stored scroll offset only when we explicitly want to scroll to a match
+            let mut scroll_area = egui::ScrollArea::vertical()
                 .id_source("preview_scroll") // Give it a unique ID
                 .max_height(remaining_height)
-                .auto_shrink([false, false])
-                .scroll_offset(egui::Vec2::new(0.0, self.preview_scroll_offset))
-                .show(ui, |ui| {
-                    self.render_preview(ui);
-                });
+                .auto_shrink([false, false]);
+
+            // Only force scroll position when a new match is selected
+            if self.should_scroll_to_match {
+                scroll_area = scroll_area.scroll_offset(egui::Vec2::new(0.0, self.preview_scroll_offset));
+                self.should_scroll_to_match = false; // Reset flag after applying
+            }
+
+            scroll_area.show(ui, |ui| {
+                self.render_preview(ui);
+            });
         });
     }
 }
 
 impl VisGrepApp {
+    fn select_match(&mut self, result_id: usize, file_path: &std::path::PathBuf, line_number: usize) {
+        self.selected_result = Some(result_id);
+        self.preview.load_file(file_path, line_number);
+
+        // Calculate scroll offset to center the target line in viewport
+        if let Some(target_line_idx) = self.preview.target_line_in_preview {
+            let line_height = 14.0; // egui code editor default line height
+            let lines_above_target = 10;
+            let scroll_to_line = target_line_idx.saturating_sub(lines_above_target);
+            self.preview_scroll_offset = scroll_to_line as f32 * line_height;
+            self.should_scroll_to_match = true; // Flag that we want to scroll
+            info!("Match selected: file line {}, preview line index {}, scroll to line {} (show {} lines above), offset {}px",
+                  line_number, target_line_idx, scroll_to_line, lines_above_target, self.preview_scroll_offset);
+        }
+    }
+
+    fn select_match_with_keyboard(&mut self, result_id: usize, file_path: &std::path::PathBuf, line_number: usize) {
+        self.select_match(result_id, file_path, line_number);
+        self.scroll_to_selected_result = true; // Flag to scroll results panel
+    }
+
+    fn select_next_match(&mut self) {
+        if self.results.is_empty() {
+            return;
+        }
+
+        let current_id = self.selected_result.unwrap_or(0);
+        let current_file_idx = current_id / 10000;
+        let current_match_idx = current_id % 10000;
+
+        // Try next match in current file
+        if current_file_idx < self.results.len() {
+            if current_match_idx + 1 < self.results[current_file_idx].matches.len() {
+                let next_id = current_file_idx * 10000 + current_match_idx + 1;
+                let file_path = self.results[current_file_idx].file_path.clone();
+                let line_number = self.results[current_file_idx].matches[current_match_idx + 1].line_number;
+                self.select_match_with_keyboard(next_id, &file_path, line_number);
+                return;
+            }
+        }
+
+        // Move to first match in next file
+        for file_idx in (current_file_idx + 1)..self.results.len() {
+            if !self.results[file_idx].matches.is_empty() {
+                let next_id = file_idx * 10000;
+                let file_path = self.results[file_idx].file_path.clone();
+                let line_number = self.results[file_idx].matches[0].line_number;
+                self.select_match_with_keyboard(next_id, &file_path, line_number);
+                return;
+            }
+        }
+
+        // Wrap to first match
+        if !self.results.is_empty() && !self.results[0].matches.is_empty() {
+            let file_path = self.results[0].file_path.clone();
+            let line_number = self.results[0].matches[0].line_number;
+            self.select_match_with_keyboard(0, &file_path, line_number);
+        }
+    }
+
+    fn handle_navigation_command(&mut self, command: NavigationCommand) {
+        match command {
+            NavigationCommand::NextMatch => self.select_next_match(),
+            NavigationCommand::PreviousMatch => self.select_previous_match(),
+            NavigationCommand::FirstMatch => self.select_first_match(),
+            NavigationCommand::LastMatch => self.select_last_match(),
+            NavigationCommand::NextMatchWithCount(count) => {
+                for _ in 0..count {
+                    self.select_next_match();
+                }
+            }
+            NavigationCommand::PreviousMatchWithCount(count) => {
+                for _ in 0..count {
+                    self.select_previous_match();
+                }
+            }
+        }
+    }
+
+    fn select_first_match(&mut self) {
+        if self.results.is_empty() {
+            return;
+        }
+
+        // Find first file with matches
+        for file_idx in 0..self.results.len() {
+            if !self.results[file_idx].matches.is_empty() {
+                let result_id = file_idx * 10000;
+                let file_path = self.results[file_idx].file_path.clone();
+                let line_number = self.results[file_idx].matches[0].line_number;
+                self.select_match_with_keyboard(result_id, &file_path, line_number);
+                return;
+            }
+        }
+    }
+
+    fn select_last_match(&mut self) {
+        if self.results.is_empty() {
+            return;
+        }
+
+        // Find last file with matches, and last match in that file
+        for file_idx in (0..self.results.len()).rev() {
+            if !self.results[file_idx].matches.is_empty() {
+                let last_match_idx = self.results[file_idx].matches.len() - 1;
+                let result_id = file_idx * 10000 + last_match_idx;
+                let file_path = self.results[file_idx].file_path.clone();
+                let line_number = self.results[file_idx].matches[last_match_idx].line_number;
+                self.select_match_with_keyboard(result_id, &file_path, line_number);
+                return;
+            }
+        }
+    }
+
+    fn select_previous_match(&mut self) {
+        if self.results.is_empty() {
+            return;
+        }
+
+        let current_id = self.selected_result.unwrap_or(0);
+        let current_file_idx = current_id / 10000;
+        let current_match_idx = current_id % 10000;
+
+        // Try previous match in current file
+        if current_match_idx > 0 {
+            let prev_id = current_file_idx * 10000 + current_match_idx - 1;
+            let file_path = self.results[current_file_idx].file_path.clone();
+            let line_number = self.results[current_file_idx].matches[current_match_idx - 1].line_number;
+            self.select_match_with_keyboard(prev_id, &file_path, line_number);
+            return;
+        }
+
+        // Move to last match in previous file
+        for file_idx in (0..current_file_idx).rev() {
+            if !self.results[file_idx].matches.is_empty() {
+                let last_match_idx = self.results[file_idx].matches.len() - 1;
+                let prev_id = file_idx * 10000 + last_match_idx;
+                let file_path = self.results[file_idx].file_path.clone();
+                let line_number = self.results[file_idx].matches[last_match_idx].line_number;
+                self.select_match_with_keyboard(prev_id, &file_path, line_number);
+                return;
+            }
+        }
+
+        // Wrap to last match in last file
+        for file_idx in (0..self.results.len()).rev() {
+            if !self.results[file_idx].matches.is_empty() {
+                let last_match_idx = self.results[file_idx].matches.len() - 1;
+                let last_id = file_idx * 10000 + last_match_idx;
+                let file_path = self.results[file_idx].file_path.clone();
+                let line_number = self.results[file_idx].matches[last_match_idx].line_number;
+                self.select_match_with_keyboard(last_id, &file_path, line_number);
+                return;
+            }
+        }
+    }
+
     fn render_results(&mut self, ui: &mut egui::Ui) {
         let filter = self.results_filter.to_lowercase();
+        let mut clicked_match: Option<(usize, std::path::PathBuf, usize)> = None;
+        let should_scroll = self.scroll_to_selected_result;
+        self.scroll_to_selected_result = false; // Reset flag
 
         for (file_idx, result) in self.results.iter().enumerate() {
             let file_name = result.file_path.file_name()
@@ -295,23 +542,15 @@ impl VisGrepApp {
 
                         let label = format!("  Line {}: {}", m.line_number, m.line_text.trim());
 
-                        if ui.selectable_label(is_selected, label).clicked() {
-                            self.selected_result = Some(result_id);
-                            self.preview.load_file(&result.file_path, m.line_number);
+                        let response = ui.selectable_label(is_selected, label);
 
-                            // Calculate scroll offset to center the target line in viewport
-                            // The target line should be at index ~50 in the preview (we load 50 lines before/after)
-                            if let Some(target_line_idx) = self.preview.target_line_in_preview {
-                                // Measure actual line height from egui's TextEdit
-                                let line_height = 14.0; // egui code editor default line height
-                                // We want the target line in the middle of viewport
-                                // Show about 10 lines above it
-                                let lines_above_target = 10;
-                                let scroll_to_line = target_line_idx.saturating_sub(lines_above_target);
-                                self.preview_scroll_offset = scroll_to_line as f32 * line_height;
-                                info!("Result clicked: file line {}, preview line index {}, scroll to line {} (show {} lines above), offset {}px, line_height={}",
-                                      m.line_number, target_line_idx, scroll_to_line, lines_above_target, self.preview_scroll_offset, line_height);
-                            }
+                        if response.clicked() {
+                            clicked_match = Some((result_id, result.file_path.clone(), m.line_number));
+                        }
+
+                        // Scroll to this item if it's selected and we should scroll
+                        if is_selected && should_scroll {
+                            response.scroll_to_me(Some(egui::Align::Center));
                         }
                     }
                 });
@@ -324,19 +563,70 @@ impl VisGrepApp {
             );
             self.collapsing_state.insert(file_idx, updated_state.is_open());
         }
+
+        // Handle match selection after iteration is complete
+        if let Some((result_id, file_path, line_number)) = clicked_match {
+            self.select_match(result_id, &file_path, line_number);
+        }
     }
 
     fn render_preview(&mut self, ui: &mut egui::Ui) {
         if let Some(preview_text) = &self.preview.content {
-            // Use monospaced font and fill available space
-            ui.add(
-                egui::TextEdit::multiline(&mut preview_text.as_str())
-                    .code_editor()
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(100) // Request many rows to fill space
-            );
+            // Check if we should try syntax highlighting based on selected result
+            let should_highlight = if let Some(selected_id) = self.selected_result {
+                let file_idx = selected_id / 10000;
+                self.results.get(file_idx)
+                    .map(|r| self.should_highlight_file(&r.file_path))
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+
+            if should_highlight {
+                // Use egui_extras syntax highlighting
+                let mut layouter = |ui: &egui::Ui, string: &str, wrap_width: f32| {
+                    let mut layout_job = egui_extras::syntax_highlighting::highlight(
+                        ui.ctx(),
+                        ui.style().as_ref(),
+                        &egui_extras::syntax_highlighting::CodeTheme::from_memory(ui.ctx(), ui.style().as_ref()),
+                        string,
+                        "rs" // Default to rust, we can make this smarter later
+                    );
+                    layout_job.wrap.max_width = wrap_width;
+                    ui.fonts(|f| f.layout_job(layout_job))
+                };
+
+                ui.add(
+                    egui::TextEdit::multiline(&mut preview_text.as_str())
+                        .code_editor()
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(100)
+                        .layouter(&mut layouter)
+                );
+            } else {
+                // Plain text for non-code files
+                ui.add(
+                    egui::TextEdit::multiline(&mut preview_text.as_str())
+                        .code_editor()
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(100)
+                );
+            }
         } else {
             ui.label("Select a result to preview");
+        }
+    }
+
+    fn should_highlight_file(&self, path: &std::path::Path) -> bool {
+        if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+            matches!(
+                ext,
+                "rs" | "toml" | "js" | "ts" | "tsx" | "jsx" | "py" | "java" | "c" | "cpp" | "h" | "hpp"
+                    | "go" | "rb" | "php" | "cs" | "swift" | "kt" | "scala" | "sh" | "bash" | "json"
+                    | "xml" | "html" | "css" | "md" | "yaml" | "yml" | "sql"
+            )
+        } else {
+            false
         }
     }
 }
