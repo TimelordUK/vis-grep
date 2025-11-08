@@ -131,18 +131,180 @@ impl GrepState {
 }
 
 // ============================================================================
-// Tail Mode State (Placeholder for now)
+// Tail Mode State
 // ============================================================================
 
+use std::collections::VecDeque;
+use std::fs::File;
+use std::io::{BufReader, BufRead, Seek, SeekFrom};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ThrottleState {
+    Normal,
+    Throttled { skip_ratio: f32 },
+    Paused { reason: ThrottleReason },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ThrottleReason {
+    TooFast,
+    UserPaused,
+    BufferFull,
+}
+
+struct TailedFile {
+    // Identity
+    path: PathBuf,
+    display_name: String,
+
+    // File monitoring
+    file_handle: Option<File>,
+    last_size: u64,
+    last_position: u64,
+
+    // Activity tracking
+    is_active: bool,
+    last_activity: Instant,
+    lines_since_last_read: usize,
+
+    // Throttling
+    paused: bool,
+    throttle_state: ThrottleState,
+
+    // Statistics
+    total_lines_read: usize,
+    total_bytes_read: u64,
+}
+
+impl TailedFile {
+    fn new(path: PathBuf) -> std::io::Result<Self> {
+        let display_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        // Try to open the file and get initial size
+        let file = File::open(&path)?;
+        let metadata = file.metadata()?;
+        let size = metadata.len();
+
+        Ok(Self {
+            path,
+            display_name,
+            file_handle: Some(file),
+            last_size: size,
+            last_position: size, // Start at end (like tail -f)
+            is_active: false,
+            last_activity: Instant::now(),
+            lines_since_last_read: 0,
+            paused: false,
+            throttle_state: ThrottleState::Normal,
+            total_lines_read: 0,
+            total_bytes_read: 0,
+        })
+    }
+
+    fn check_for_updates(&mut self) -> std::io::Result<Vec<String>> {
+        // Re-open file to get fresh metadata
+        let metadata = std::fs::metadata(&self.path)?;
+        let current_size = metadata.len();
+
+        if current_size > self.last_size {
+            // File grew - read new content
+            let mut file = File::open(&self.path)?;
+            file.seek(SeekFrom::Start(self.last_position))?;
+
+            let reader = BufReader::new(file);
+            let new_lines: Vec<String> = reader
+                .lines()
+                .filter_map(|l| l.ok())
+                .collect();
+
+            let bytes_read = current_size - self.last_position;
+            self.total_bytes_read += bytes_read;
+            self.total_lines_read += new_lines.len();
+            self.last_size = current_size;
+            self.last_position = current_size;
+
+            Ok(new_lines)
+        } else if current_size < self.last_size {
+            // File was truncated/rotated
+            self.last_position = 0;
+            self.last_size = current_size;
+            Ok(vec!["[FILE TRUNCATED/ROTATED]".to_string()])
+        } else {
+            // No change
+            Ok(vec![])
+        }
+    }
+}
+
+struct LogLine {
+    timestamp: Instant,
+    source_file: String,
+    line_number: usize,
+    content: String,
+}
+
 struct TailState {
-    // TODO: Will add tailed files, output buffer, filters, etc.
-    placeholder: String,
+    // Files being monitored
+    files: Vec<TailedFile>,
+    selected_file_index: Option<usize>,
+
+    // Output buffer (circular)
+    output_buffer: VecDeque<LogLine>,
+    max_buffer_lines: usize,
+
+    // Global controls
+    paused_all: bool,
+    auto_scroll: bool,
+
+    // Filtering (future)
+    filter_pattern: String,
+
+    // Polling
+    last_poll_time: Instant,
+    poll_interval_ms: u64,
+
+    // Statistics
+    total_lines_received: usize,
+    lines_dropped: usize,
+
+    // Performance tuning
+    max_lines_per_poll: usize,
 }
 
 impl TailState {
     fn new() -> Self {
         Self {
-            placeholder: String::from("Tail mode coming soon!"),
+            files: Vec::new(),
+            selected_file_index: None,
+            output_buffer: VecDeque::new(),
+            max_buffer_lines: 10000,
+            paused_all: false,
+            auto_scroll: true,
+            filter_pattern: String::new(),
+            last_poll_time: Instant::now(),
+            poll_interval_ms: 250,
+            total_lines_received: 0,
+            lines_dropped: 0,
+            max_lines_per_poll: 100,
+        }
+    }
+
+    fn add_file(&mut self, path: PathBuf) -> Result<(), String> {
+        match TailedFile::new(path) {
+            Ok(file) => {
+                info!("Started tailing: {}", file.display_name);
+                self.files.push(file);
+                Ok(())
+            }
+            Err(e) => {
+                let msg = format!("Failed to tail file: {}", e);
+                info!("{}", msg);
+                Err(msg)
+            }
         }
     }
 }
@@ -179,11 +341,20 @@ impl Default for VisGrepApp {
 
 impl VisGrepApp {
     fn new(startup_config: StartupConfig) -> Self {
+        let mut tail_state = TailState::new();
+
+        // Add files from startup config
+        for file_path in startup_config.tail_files {
+            if let Err(e) = tail_state.add_file(file_path) {
+                eprintln!("{}", e);
+            }
+        }
+
         Self {
             mode: startup_config.mode,
 
             grep_state: GrepState::new(),
-            tail_state: TailState::new(),
+            tail_state,
 
             preview: FilePreview::new(),
             preview_scroll_offset: 0.0,
@@ -244,6 +415,67 @@ impl VisGrepApp {
             self.grep_state.collapsing_state.insert(i, true);
         }
     }
+
+    fn poll_tail_files(&mut self) {
+        if self.tail_state.paused_all {
+            return;
+        }
+
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.tail_state.last_poll_time);
+
+        // Poll at configured interval
+        if elapsed < std::time::Duration::from_millis(self.tail_state.poll_interval_ms) {
+            return;
+        }
+
+        self.tail_state.last_poll_time = now;
+
+        // Poll each file
+        for file in &mut self.tail_state.files {
+            if file.paused {
+                continue;
+            }
+
+            match file.check_for_updates() {
+                Ok(new_lines) => {
+                    if !new_lines.is_empty() {
+                        file.is_active = true;
+                        file.last_activity = now;
+                        file.lines_since_last_read = new_lines.len();
+
+                        // Add lines to output buffer
+                        for line in new_lines {
+                            let log_line = LogLine {
+                                timestamp: now,
+                                source_file: file.display_name.clone(),
+                                line_number: file.total_lines_read,
+                                content: line,
+                            };
+
+                            self.tail_state.output_buffer.push_back(log_line);
+                            self.tail_state.total_lines_received += 1;
+
+                            // Trim buffer if over capacity
+                            if self.tail_state.output_buffer.len() > self.tail_state.max_buffer_lines {
+                                self.tail_state.output_buffer.pop_front();
+                                self.tail_state.lines_dropped += 1;
+                            }
+                        }
+                    } else {
+                        // Mark as idle after 2 seconds
+                        if now.duration_since(file.last_activity) > std::time::Duration::from_secs(2) {
+                            file.is_active = false;
+                            file.lines_since_last_read = 0;
+                        }
+                    }
+                }
+                Err(e) => {
+                    info!("Error reading {}: {}", file.display_name, e);
+                }
+            }
+        }
+    }
 }
 
 impl eframe::App for VisGrepApp {
@@ -274,13 +506,21 @@ impl eframe::App for VisGrepApp {
             self.render_status_bar(ui);
         });
 
-        // Debounced search handling (Grep mode only)
-        if self.mode == AppMode::Grep
-            && self.grep_state.pending_search
-            && self.grep_state.last_search_time.elapsed() > std::time::Duration::from_millis(500)
-            && !self.grep_state.search_query.is_empty()
-        {
-            self.perform_search();
+        // Mode-specific background tasks
+        match self.mode {
+            AppMode::Grep => {
+                // Debounced search handling
+                if self.grep_state.pending_search
+                    && self.grep_state.last_search_time.elapsed() > std::time::Duration::from_millis(500)
+                    && !self.grep_state.search_query.is_empty()
+                {
+                    self.perform_search();
+                }
+            }
+            AppMode::Tail => {
+                // Poll files for updates
+                self.poll_tail_files();
+            }
         }
 
         ctx.request_repaint();
@@ -1069,22 +1309,164 @@ impl VisGrepApp {
         });
     }
 
-    /// Render Tail mode UI (placeholder)
+    /// Render Tail mode UI
     fn render_tail_mode(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Tail Mode");
+        // File list header
+        ui.horizontal(|ui| {
+            ui.label("Files Being Monitored:");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(if self.tail_state.paused_all { "▶ Resume All" } else { "⏸ Pause All" }).clicked() {
+                    self.tail_state.paused_all = !self.tail_state.paused_all;
+                }
+            });
+        });
+
         ui.separator();
 
-        ui.label("Tail mode is coming soon!");
-        ui.add_space(10.0);
+        // File list (static, no auto-scroll)
+        egui::ScrollArea::vertical()
+            .id_salt("file_list_scroll")
+            .max_height(150.0)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                if self.tail_state.files.is_empty() {
+                    ui.label("No files being monitored.");
+                    ui.label("Start with: vis-grep -f /path/to/file.log");
+                } else {
+                    for (idx, file) in self.tail_state.files.iter_mut().enumerate() {
+                        ui.horizontal(|ui| {
+                            // Activity indicator
+                            let indicator = if file.is_active { "●" } else { "○" };
+                            let color = if file.is_active {
+                                egui::Color32::from_rgb(0, 255, 0)
+                            } else {
+                                egui::Color32::GRAY
+                            };
+                            ui.colored_label(color, indicator);
 
-        ui.label("This will allow you to:");
-        ui.label("  • Monitor multiple files in real-time (like tail -f)");
-        ui.label("  • See activity indicators for active files");
-        ui.label("  • Filter live output with regex patterns");
-        ui.label("  • Watch files on network shares reliably");
+                            // Filename
+                            let selected = self.tail_state.selected_file_index == Some(idx);
+                            if ui.selectable_label(selected, &file.display_name).clicked() {
+                                self.tail_state.selected_file_index = Some(idx);
+                            }
 
-        ui.add_space(20.0);
-        ui.label(format!("Placeholder: {}", self.tail_state.placeholder));
+                            // Size
+                            ui.label(format!("{:.1} KB", file.last_size as f64 / 1024.0));
+
+                            // Activity info
+                            if file.is_active && file.lines_since_last_read > 0 {
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(255, 200, 100),
+                                    format!("(+{} lines)", file.lines_since_last_read)
+                                );
+                            } else if !file.is_active {
+                                ui.label("(idle)");
+                            }
+
+                            // Individual pause button
+                            if ui.small_button(if file.paused { "▶" } else { "⏸" }).clicked() {
+                                file.paused = !file.paused;
+                            }
+                        });
+                    }
+                }
+            });
+
+        ui.separator();
+
+        // Output header
+        ui.horizontal(|ui| {
+            ui.label("Output:");
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(if self.tail_state.paused_all { "▶" } else { "⏸" }).clicked() {
+                    self.tail_state.paused_all = !self.tail_state.paused_all;
+                }
+                if ui.button("Clear").clicked() {
+                    self.tail_state.output_buffer.clear();
+                    self.tail_state.total_lines_received = 0;
+                    self.tail_state.lines_dropped = 0;
+                }
+            });
+        });
+
+        ui.separator();
+
+        // Output area
+        let available_height = ui.available_height() - 60.0;
+
+        let scroll_output = egui::ScrollArea::vertical()
+            .id_salt("tail_output_scroll")
+            .auto_shrink([false, false])
+            .max_height(available_height)
+            .stick_to_bottom(self.tail_state.auto_scroll);
+
+        scroll_output.show(ui, |ui| {
+            ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
+
+            for log_line in &self.tail_state.output_buffer {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+
+                    // Timestamp (relative)
+                    let elapsed = log_line.timestamp.elapsed();
+                    let secs = elapsed.as_secs();
+                    let time_str = if secs < 60 {
+                        format!("{}s", secs)
+                    } else if secs < 3600 {
+                        format!("{}m", secs / 60)
+                    } else {
+                        format!("{}h", secs / 3600)
+                    };
+                    ui.label(egui::RichText::new(time_str).color(egui::Color32::GRAY));
+
+                    // Source file with color
+                    let color = get_color_for_file(&log_line.source_file);
+                    ui.colored_label(color, format!("[{}]", log_line.source_file));
+
+                    // Content
+                    ui.label(&log_line.content);
+                });
+            }
+
+            if self.tail_state.output_buffer.is_empty() {
+                ui.label(egui::RichText::new("Waiting for log output...")
+                    .italics()
+                    .color(egui::Color32::GRAY));
+            }
+        });
+
+        // Status bar
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.tail_state.auto_scroll, "Auto-scroll");
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let buffer_pct = if self.tail_state.max_buffer_lines > 0 {
+                    (self.tail_state.output_buffer.len() as f32
+                        / self.tail_state.max_buffer_lines as f32) * 100.0
+                } else {
+                    0.0
+                };
+
+                let active_count = self.tail_state.files.iter().filter(|f| f.is_active).count();
+
+                ui.label(format!("Files: {}  Active: {}  Lines: {} / {}  Buffer: {:.1}%",
+                    self.tail_state.files.len(),
+                    active_count,
+                    self.tail_state.output_buffer.len(),
+                    self.tail_state.max_buffer_lines,
+                    buffer_pct
+                ));
+
+                if self.tail_state.lines_dropped > 0 {
+                    ui.colored_label(
+                        egui::Color32::YELLOW,
+                        format!("  ⚠ Dropped: {}", self.tail_state.lines_dropped)
+                    );
+                }
+            });
+        });
     }
 
     /// Render the highlight pattern field
@@ -1349,5 +1731,51 @@ fn main() -> eframe::Result<()> {
         "VisGrep",
         native_options,
         Box::new(move |_cc| Ok(Box::new(VisGrepApp::new(startup_config)))),
+    )
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+// Helper function for color coding files
+fn get_color_for_file(filename: &str) -> egui::Color32 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    filename.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    // Generate distinguishable colors
+    let hue = (hash % 12) as f32 * 30.0; // 12 colors around the wheel
+    let (r, g, b) = hsl_to_rgb(hue, 0.7, 0.6);
+    egui::Color32::from_rgb(r, g, b)
+}
+
+// Convert HSL to RGB
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = l - c / 2.0;
+
+    let (r, g, b) = if h < 60.0 {
+        (c, x, 0.0)
+    } else if h < 120.0 {
+        (x, c, 0.0)
+    } else if h < 180.0 {
+        (0.0, c, x)
+    } else if h < 240.0 {
+        (0.0, x, c)
+    } else if h < 300.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
+
+    (
+        ((r + m) * 255.0) as u8,
+        ((g + m) * 255.0) as u8,
+        ((b + m) * 255.0) as u8,
     )
 }
