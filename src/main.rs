@@ -270,14 +270,19 @@ impl VisGrepApp {
 
             let header_id = ui.make_persistent_id(format!("header_{}", file_idx));
 
-            // Use CollapsingState to control open/close state
+            // Load the state from egui's storage (respects user clicks)
             let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
                 ui.ctx(),
                 header_id,
                 is_open,
             );
-            state.set_open(is_open);
-            state.store(ui.ctx());
+
+            // Only force the state if our tracked state differs from egui's state
+            // This allows user clicks to work, but also allows Expand/Collapse All buttons to work
+            if state.is_open() != is_open {
+                state.set_open(is_open);
+                state.store(ui.ctx());
+            }
 
             state
                 .show_header(ui, |ui| {
@@ -310,6 +315,14 @@ impl VisGrepApp {
                         }
                     }
                 });
+
+            // Re-load state to get updated open/close status after user interaction
+            let updated_state = egui::collapsing_header::CollapsingState::load_with_default_open(
+                ui.ctx(),
+                header_id,
+                is_open,
+            );
+            self.collapsing_state.insert(file_idx, updated_state.is_open());
         }
     }
 
