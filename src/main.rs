@@ -166,8 +166,27 @@ impl eframe::App for VisGrepApp {
             self.render_file_age_filter(ui);
             ui.separator();
 
-            // Results filter
-            self.render_results_filter(ui);
+            // Results filter and expand/collapse controls
+            ui.horizontal(|ui| {
+                ui.label("Filter Results:");
+                ui.add(egui::TextEdit::singleline(&mut self.results_filter).desired_width(300.0));
+                if ui.small_button("Clear").clicked() {
+                    self.results_filter.clear();
+                }
+
+                ui.separator();
+
+                if ui.button("Expand All").clicked() {
+                    for i in 0..self.results.len() {
+                        self.collapsing_state.insert(i, true);
+                    }
+                }
+                if ui.button("Collapse All").clicked() {
+                    for i in 0..self.results.len() {
+                        self.collapsing_state.insert(i, false);
+                    }
+                }
+            });
             ui.separator();
 
             // Main content area - results and preview
@@ -203,7 +222,23 @@ impl eframe::App for VisGrepApp {
 
             // Preview panel (remaining space)
             ui.label("Preview:");
-            self.render_preview(ui);
+
+            let remaining_height = ui.available_height();
+
+            let mut scroll_area = egui::ScrollArea::vertical()
+                .id_source("preview_scroll")
+                .max_height(remaining_height)
+                .auto_shrink([false, false]);
+
+            // Only force scroll position when a new match is selected
+            if self.should_scroll_to_match {
+                scroll_area = scroll_area.scroll_offset(egui::Vec2::new(0.0, self.preview_scroll_offset));
+                self.should_scroll_to_match = false; // Reset flag after applying
+            }
+
+            scroll_area.show(ui, |ui| {
+                self.render_preview(ui);
+            });
 
             ui.separator();
 
@@ -1104,17 +1139,6 @@ impl VisGrepApp {
 
             if ui.small_button("?").clicked() {
                 info!("File Age Filter: Only search files modified within the specified hours");
-            }
-        });
-    }
-
-    /// Render results filter field
-    fn render_results_filter(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label("Filter Results:");
-            ui.add(egui::TextEdit::singleline(&mut self.results_filter).desired_width(300.0));
-            if ui.small_button("Clear").clicked() {
-                self.results_filter.clear();
             }
         });
     }
