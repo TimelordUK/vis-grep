@@ -1,7 +1,9 @@
 use arboard::Clipboard;
+use clap::{Parser, Subcommand};
 use eframe::egui;
 use log::info;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Instant;
 
 mod config;
@@ -13,6 +15,52 @@ use config::Config;
 use input_handler::{InputHandler, NavigationCommand};
 use preview::FilePreview;
 use search::{SearchEngine, SearchResult};
+
+// ============================================================================
+// Command-Line Arguments
+// ============================================================================
+
+/// VisGrep - Fast visual search and log monitoring tool
+#[derive(Parser, Debug)]
+#[command(name = "vis-grep")]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    /// Start in tail mode (same as 'tail' subcommand)
+    #[arg(short = 'f', long = "follow")]
+    follow: bool,
+
+    /// Files to tail/follow (when using -f flag)
+    #[arg(value_name = "FILES")]
+    files: Vec<PathBuf>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Tail/follow mode - monitor files like 'tail -f'
+    Tail {
+        /// Files to monitor
+        #[arg(required = true, value_name = "FILES")]
+        files: Vec<PathBuf>,
+    },
+}
+
+/// Startup configuration for the app
+struct StartupConfig {
+    mode: AppMode,
+    tail_files: Vec<PathBuf>,
+}
+
+impl Default for StartupConfig {
+    fn default() -> Self {
+        Self {
+            mode: AppMode::Grep,
+            tail_files: Vec::new(),
+        }
+    }
+}
 
 // ============================================================================
 // Application Mode Types
@@ -125,8 +173,14 @@ struct VisGrepApp {
 
 impl Default for VisGrepApp {
     fn default() -> Self {
+        Self::new(StartupConfig::default())
+    }
+}
+
+impl VisGrepApp {
+    fn new(startup_config: StartupConfig) -> Self {
         Self {
-            mode: AppMode::Grep,
+            mode: startup_config.mode,
 
             grep_state: GrepState::new(),
             tail_state: TailState::new(),
@@ -142,9 +196,7 @@ impl Default for VisGrepApp {
             config: Config::load(),
         }
     }
-}
 
-impl VisGrepApp {
     /// Expand ~ to home directory
     fn expand_tilde(path: &str) -> String {
         if let Some(stripped) = path.strip_prefix("~/") {
@@ -1256,18 +1308,46 @@ fn main() -> eframe::Result<()> {
         .filter_level(log::LevelFilter::Info)
         .init();
 
-    info!("VisGrep starting...");
+    // Parse command-line arguments
+    let cli = Cli::parse();
+
+    // Determine startup configuration
+    let startup_config = match cli.command {
+        Some(Commands::Tail { files }) => {
+            info!("Starting in Tail mode with files: {:?}", files);
+            StartupConfig {
+                mode: AppMode::Tail,
+                tail_files: files,
+            }
+        }
+        None => {
+            if cli.follow || !cli.files.is_empty() {
+                // -f flag or files provided without subcommand
+                info!("Starting in Tail mode (via -f flag) with files: {:?}", cli.files);
+                StartupConfig {
+                    mode: AppMode::Tail,
+                    tail_files: cli.files,
+                }
+            } else {
+                // Default: Grep mode
+                info!("Starting in Grep mode (default)");
+                StartupConfig::default()
+            }
+        }
+    };
+
+    info!("VisGrep starting in {:?} mode...", startup_config.mode);
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 900.0])
-            .with_title("VisGrep - Fast Search Tool"),
+            .with_title("VisGrep - Fast Search & Tail Tool"),
         ..Default::default()
     };
 
     eframe::run_native(
         "VisGrep",
         native_options,
-        Box::new(|_cc| Ok(Box::new(VisGrepApp::default()))),
+        Box::new(move |_cc| Ok(Box::new(VisGrepApp::new(startup_config)))),
     )
 }
