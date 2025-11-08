@@ -14,7 +14,21 @@ use input_handler::{InputHandler, NavigationCommand};
 use preview::FilePreview;
 use search::{SearchEngine, SearchResult};
 
-struct VisGrepApp {
+// ============================================================================
+// Application Mode Types
+// ============================================================================
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AppMode {
+    Grep,
+    Tail,
+}
+
+// ============================================================================
+// Grep Mode State
+// ============================================================================
+
+struct GrepState {
     search_path: String,
     file_pattern: String,
     search_query: String,
@@ -26,33 +40,21 @@ struct VisGrepApp {
     search_engine: SearchEngine,
     results: Vec<SearchResult>,
     selected_result: Option<usize>,
-    preview: FilePreview,
 
     searching: bool,
-
-    // UI state
     results_filter: String,
     collapsing_state: HashMap<usize, bool>,
     last_search_time: Instant,
     pending_search: bool,
-    preview_scroll_offset: f32,
-    should_scroll_to_match: bool, // Only scroll when a new match is selected
-    scroll_to_selected_result: bool, // Flag to scroll results panel to selected item
-
-    input_handler: InputHandler,
-    marks: HashMap<char, usize>, // Store marks (a-z) -> result_id
 
     // FIX message highlighting pattern
     fix_highlight_pattern: String,
-
-    // Configuration
-    config: Config,
 }
 
-impl Default for VisGrepApp {
-    fn default() -> Self {
+impl GrepState {
+    fn new() -> Self {
         Self {
-            search_path: Self::expand_tilde(
+            search_path: VisGrepApp::expand_tilde(
                 std::env::current_dir()
                     .unwrap_or_default()
                     .to_string_lossy()
@@ -68,22 +70,74 @@ impl Default for VisGrepApp {
             search_engine: SearchEngine::new(),
             results: Vec::new(),
             selected_result: None,
-            preview: FilePreview::new(),
 
             searching: false,
-
             results_filter: String::new(),
             collapsing_state: HashMap::new(),
             last_search_time: Instant::now(),
             pending_search: false,
+
+            fix_highlight_pattern: String::new(),
+        }
+    }
+}
+
+// ============================================================================
+// Tail Mode State (Placeholder for now)
+// ============================================================================
+
+struct TailState {
+    // TODO: Will add tailed files, output buffer, filters, etc.
+    placeholder: String,
+}
+
+impl TailState {
+    fn new() -> Self {
+        Self {
+            placeholder: String::from("Tail mode coming soon!"),
+        }
+    }
+}
+
+// ============================================================================
+// Main Application State
+// ============================================================================
+
+struct VisGrepApp {
+    // Current mode
+    mode: AppMode,
+
+    // Mode-specific state
+    grep_state: GrepState,
+    tail_state: TailState,
+
+    // Shared state (used across modes)
+    preview: FilePreview,
+    preview_scroll_offset: f32,
+    should_scroll_to_match: bool,
+    scroll_to_selected_result: bool,
+
+    input_handler: InputHandler,
+    marks: HashMap<char, usize>,
+
+    config: Config,
+}
+
+impl Default for VisGrepApp {
+    fn default() -> Self {
+        Self {
+            mode: AppMode::Grep,
+
+            grep_state: GrepState::new(),
+            tail_state: TailState::new(),
+
+            preview: FilePreview::new(),
             preview_scroll_offset: 0.0,
             should_scroll_to_match: false,
             scroll_to_selected_result: false,
 
             input_handler: InputHandler::new(),
             marks: HashMap::new(),
-
-            fix_highlight_pattern: String::new(),
 
             config: Config::load(),
         }
@@ -103,39 +157,39 @@ impl VisGrepApp {
 
     fn perform_search(&mut self) {
         // Expand tilde in search path
-        let expanded_path = Self::expand_tilde(&self.search_path);
+        let expanded_path = Self::expand_tilde(&self.grep_state.search_path);
 
         info!(
             "Starting search: path='{}', pattern='{}', query='{}', file_age={:?}hrs",
-            &expanded_path, &self.file_pattern, &self.search_query, &self.file_age_hours
+            &expanded_path, &self.grep_state.file_pattern, &self.grep_state.search_query, &self.grep_state.file_age_hours
         );
-        self.searching = true;
-        self.pending_search = false;
+        self.grep_state.searching = true;
+        self.grep_state.pending_search = false;
         let start = Instant::now();
-        self.results = self.search_engine.search(
+        self.grep_state.results = self.grep_state.search_engine.search(
             &expanded_path,
-            &self.file_pattern,
-            &self.search_query,
-            self.case_sensitive,
-            self.use_regex,
-            self.recursive,
-            self.file_age_hours,
+            &self.grep_state.file_pattern,
+            &self.grep_state.search_query,
+            self.grep_state.case_sensitive,
+            self.grep_state.use_regex,
+            self.grep_state.recursive,
+            self.grep_state.file_age_hours,
         );
         let duration = start.elapsed();
         info!(
             "Search completed in {:.2}s: found {} matches in {} files",
             duration.as_secs_f64(),
-            self.results.iter().map(|r| r.matches.len()).sum::<usize>(),
-            self.results.len()
+            self.grep_state.results.iter().map(|r| r.matches.len()).sum::<usize>(),
+            self.grep_state.results.len()
         );
-        self.searching = false;
-        self.selected_result = None;
-        self.last_search_time = Instant::now();
+        self.grep_state.searching = false;
+        self.grep_state.selected_result = None;
+        self.grep_state.last_search_time = Instant::now();
 
         // Initialize all headers as expanded for new search
-        self.collapsing_state.clear();
-        for i in 0..self.results.len() {
-            self.collapsing_state.insert(i, true);
+        self.grep_state.collapsing_state.clear();
+        for i in 0..self.grep_state.results.len() {
+            self.grep_state.collapsing_state.insert(i, true);
         }
     }
 }
@@ -152,93 +206,15 @@ impl eframe::App for VisGrepApp {
             self.render_header(ui);
             ui.separator();
 
-            // Search controls
-            self.render_highlight_pattern_field(ui);
+            // Mode selector tabs
+            self.render_mode_tabs(ui);
             ui.separator();
 
-            self.render_search_path_field(ui);
-            ui.separator();
-
-            self.render_search_query_field(ui);
-            ui.separator();
-
-            // File age filter
-            self.render_file_age_filter(ui);
-            ui.separator();
-
-            // Results filter and expand/collapse controls
-            ui.horizontal(|ui| {
-                ui.label("Filter Results:");
-                ui.add(egui::TextEdit::singleline(&mut self.results_filter).desired_width(300.0));
-                if ui.small_button("Clear").clicked() {
-                    self.results_filter.clear();
-                }
-
-                ui.separator();
-
-                if ui.button("Expand All").clicked() {
-                    for i in 0..self.results.len() {
-                        self.collapsing_state.insert(i, true);
-                    }
-                }
-                if ui.button("Collapse All").clicked() {
-                    for i in 0..self.results.len() {
-                        self.collapsing_state.insert(i, false);
-                    }
-                }
-            });
-            ui.separator();
-
-            // Main content area - results and preview
-            let available_height = ui.available_height();
-
-            // Results panel (40% of available height)
-            egui::ScrollArea::vertical()
-                .id_salt("results_scroll")
-                .max_height(available_height * 0.4)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    if self.searching {
-                        ui.label("Searching...");
-                    } else if self.results.is_empty() && !self.search_query.is_empty() {
-                        ui.label("No results found");
-                    } else {
-                        self.render_results(ui);
-                    }
-                });
-
-            ui.separator();
-
-            // Matched Line Focus Panel
-            ui.label("Matched Line:");
-            egui::Frame::none()
-                .fill(egui::Color32::from_rgb(40, 40, 50))
-                .inner_margin(egui::Margin::same(8.0))
-                .show(ui, |ui| {
-                    self.render_matched_line_focus(ui);
-                });
-
-            ui.separator();
-
-            // Preview panel (remaining space)
-            ui.label("Preview:");
-
-            let remaining_height = ui.available_height();
-
-            let mut scroll_area = egui::ScrollArea::vertical()
-                .id_salt("preview_scroll")
-                .max_height(remaining_height)
-                .auto_shrink([false, false]);
-
-            // Only force scroll position when a new match is selected
-            if self.should_scroll_to_match {
-                scroll_area = scroll_area.scroll_offset(egui::Vec2::new(0.0, self.preview_scroll_offset));
-                self.should_scroll_to_match = false; // Reset flag after applying
+            // Render mode-specific UI
+            match self.mode {
+                AppMode::Grep => self.render_grep_mode(ui),
+                AppMode::Tail => self.render_tail_mode(ui),
             }
-
-            scroll_area.show(ui, |ui| {
-                self.render_preview(ui);
-            });
 
             ui.separator();
 
@@ -246,26 +222,22 @@ impl eframe::App for VisGrepApp {
             self.render_status_bar(ui);
         });
 
-        // Debounced search handling
-        if self.pending_search
-            && self.last_search_time.elapsed() > std::time::Duration::from_millis(500)
-            && !self.search_query.is_empty() {
-                self.perform_search();
-                self.pending_search = false;
-            }
+        // Debounced search handling (Grep mode only)
+        if self.mode == AppMode::Grep
+            && self.grep_state.pending_search
+            && self.grep_state.last_search_time.elapsed() > std::time::Duration::from_millis(500)
+            && !self.grep_state.search_query.is_empty()
+        {
+            self.perform_search();
+        }
 
         ctx.request_repaint();
     }
 }
 
 impl VisGrepApp {
-    fn select_match(
-        &mut self,
-        result_id: usize,
-        file_path: &std::path::Path,
-        line_number: usize,
-    ) {
-        self.selected_result = Some(result_id);
+    fn select_match(&mut self, result_id: usize, file_path: &std::path::Path, line_number: usize) {
+        self.grep_state.selected_result = Some(result_id);
         self.preview.load_file(file_path, line_number);
 
         // Calculate scroll offset to center the target line in viewport
@@ -291,40 +263,41 @@ impl VisGrepApp {
     }
 
     fn select_next_match(&mut self) {
-        if self.results.is_empty() {
+        if self.grep_state.results.is_empty() {
             return;
         }
 
-        let current_id = self.selected_result.unwrap_or(0);
+        let current_id = self.grep_state.selected_result.unwrap_or(0);
         let current_file_idx = current_id / 10000;
         let current_match_idx = current_id % 10000;
 
         // Try next match in current file
-        if current_file_idx < self.results.len()
-            && current_match_idx + 1 < self.results[current_file_idx].matches.len() {
-                let next_id = current_file_idx * 10000 + current_match_idx + 1;
-                let file_path = self.results[current_file_idx].file_path.clone();
-                let line_number =
-                    self.results[current_file_idx].matches[current_match_idx + 1].line_number;
-                self.select_match_with_keyboard(next_id, &file_path, line_number);
-                return;
-            }
+        if current_file_idx < self.grep_state.results.len()
+            && current_match_idx + 1 < self.grep_state.results[current_file_idx].matches.len()
+        {
+            let next_id = current_file_idx * 10000 + current_match_idx + 1;
+            let file_path = self.grep_state.results[current_file_idx].file_path.clone();
+            let line_number =
+                self.grep_state.results[current_file_idx].matches[current_match_idx + 1].line_number;
+            self.select_match_with_keyboard(next_id, &file_path, line_number);
+            return;
+        }
 
         // Move to first match in next file
-        for file_idx in (current_file_idx + 1)..self.results.len() {
-            if !self.results[file_idx].matches.is_empty() {
+        for file_idx in (current_file_idx + 1)..self.grep_state.results.len() {
+            if !self.grep_state.results[file_idx].matches.is_empty() {
                 let next_id = file_idx * 10000;
-                let file_path = self.results[file_idx].file_path.clone();
-                let line_number = self.results[file_idx].matches[0].line_number;
+                let file_path = self.grep_state.results[file_idx].file_path.clone();
+                let line_number = self.grep_state.results[file_idx].matches[0].line_number;
                 self.select_match_with_keyboard(next_id, &file_path, line_number);
                 return;
             }
         }
 
         // Wrap to first match
-        if !self.results.is_empty() && !self.results[0].matches.is_empty() {
-            let file_path = self.results[0].file_path.clone();
-            let line_number = self.results[0].matches[0].line_number;
+        if !self.grep_state.results.is_empty() && !self.grep_state.results[0].matches.is_empty() {
+            let file_path = self.grep_state.results[0].file_path.clone();
+            let line_number = self.grep_state.results[0].matches[0].line_number;
             self.select_match_with_keyboard(0, &file_path, line_number);
         }
     }
@@ -367,7 +340,7 @@ impl VisGrepApp {
     }
 
     fn set_mark(&mut self, ch: char) {
-        if let Some(result_id) = self.selected_result {
+        if let Some(result_id) = self.grep_state.selected_result {
             self.marks.insert(ch, result_id);
             info!("Set mark '{}' at result {}", ch, result_id);
         } else {
@@ -380,9 +353,9 @@ impl VisGrepApp {
             let file_idx = result_id / 10000;
             let match_idx = result_id % 10000;
 
-            if file_idx < self.results.len() && match_idx < self.results[file_idx].matches.len() {
-                let file_path = self.results[file_idx].file_path.clone();
-                let line_number = self.results[file_idx].matches[match_idx].line_number;
+            if file_idx < self.grep_state.results.len() && match_idx < self.grep_state.results[file_idx].matches.len() {
+                let file_path = self.grep_state.results[file_idx].file_path.clone();
+                let line_number = self.grep_state.results[file_idx].matches[match_idx].line_number;
                 self.select_match_with_keyboard(result_id, &file_path, line_number);
                 info!("Jumped to mark '{}'", ch);
             } else {
@@ -394,20 +367,20 @@ impl VisGrepApp {
     }
 
     fn open_in_explorer(&self) {
-        if self.results.is_empty() {
+        if self.grep_state.results.is_empty() {
             info!("No results to open");
             return;
         }
 
-        let current_id = self.selected_result.unwrap_or(0);
+        let current_id = self.grep_state.selected_result.unwrap_or(0);
         let current_file_idx = current_id / 10000;
 
-        if current_file_idx >= self.results.len() {
+        if current_file_idx >= self.grep_state.results.len() {
             info!("Invalid file index");
             return;
         }
 
-        let file_path = &self.results[current_file_idx].file_path;
+        let file_path = &self.grep_state.results[current_file_idx].file_path;
 
         #[cfg(target_os = "windows")]
         {
@@ -495,16 +468,16 @@ impl VisGrepApp {
     }
 
     fn select_first_match(&mut self) {
-        if self.results.is_empty() {
+        if self.grep_state.results.is_empty() {
             return;
         }
 
         // Find first file with matches
-        for file_idx in 0..self.results.len() {
-            if !self.results[file_idx].matches.is_empty() {
+        for file_idx in 0..self.grep_state.results.len() {
+            if !self.grep_state.results[file_idx].matches.is_empty() {
                 let result_id = file_idx * 10000;
-                let file_path = self.results[file_idx].file_path.clone();
-                let line_number = self.results[file_idx].matches[0].line_number;
+                let file_path = self.grep_state.results[file_idx].file_path.clone();
+                let line_number = self.grep_state.results[file_idx].matches[0].line_number;
                 self.select_match_with_keyboard(result_id, &file_path, line_number);
                 return;
             }
@@ -512,17 +485,17 @@ impl VisGrepApp {
     }
 
     fn select_last_match(&mut self) {
-        if self.results.is_empty() {
+        if self.grep_state.results.is_empty() {
             return;
         }
 
         // Find last file with matches, and last match in that file
-        for file_idx in (0..self.results.len()).rev() {
-            if !self.results[file_idx].matches.is_empty() {
-                let last_match_idx = self.results[file_idx].matches.len() - 1;
+        for file_idx in (0..self.grep_state.results.len()).rev() {
+            if !self.grep_state.results[file_idx].matches.is_empty() {
+                let last_match_idx = self.grep_state.results[file_idx].matches.len() - 1;
                 let result_id = file_idx * 10000 + last_match_idx;
-                let file_path = self.results[file_idx].file_path.clone();
-                let line_number = self.results[file_idx].matches[last_match_idx].line_number;
+                let file_path = self.grep_state.results[file_idx].file_path.clone();
+                let line_number = self.grep_state.results[file_idx].matches[last_match_idx].line_number;
                 self.select_match_with_keyboard(result_id, &file_path, line_number);
                 return;
             }
@@ -530,67 +503,67 @@ impl VisGrepApp {
     }
 
     fn select_first_match_in_current_file(&mut self) {
-        if self.results.is_empty() {
+        if self.grep_state.results.is_empty() {
             return;
         }
 
-        let current_id = self.selected_result.unwrap_or(0);
+        let current_id = self.grep_state.selected_result.unwrap_or(0);
         let current_file_idx = current_id / 10000;
 
-        if current_file_idx < self.results.len()
-            && !self.results[current_file_idx].matches.is_empty()
+        if current_file_idx < self.grep_state.results.len()
+            && !self.grep_state.results[current_file_idx].matches.is_empty()
         {
             let result_id = current_file_idx * 10000;
-            let file_path = self.results[current_file_idx].file_path.clone();
-            let line_number = self.results[current_file_idx].matches[0].line_number;
+            let file_path = self.grep_state.results[current_file_idx].file_path.clone();
+            let line_number = self.grep_state.results[current_file_idx].matches[0].line_number;
             self.select_match_with_keyboard(result_id, &file_path, line_number);
         }
     }
 
     fn select_last_match_in_current_file(&mut self) {
-        if self.results.is_empty() {
+        if self.grep_state.results.is_empty() {
             return;
         }
 
-        let current_id = self.selected_result.unwrap_or(0);
+        let current_id = self.grep_state.selected_result.unwrap_or(0);
         let current_file_idx = current_id / 10000;
 
-        if current_file_idx < self.results.len()
-            && !self.results[current_file_idx].matches.is_empty()
+        if current_file_idx < self.grep_state.results.len()
+            && !self.grep_state.results[current_file_idx].matches.is_empty()
         {
-            let last_match_idx = self.results[current_file_idx].matches.len() - 1;
+            let last_match_idx = self.grep_state.results[current_file_idx].matches.len() - 1;
             let result_id = current_file_idx * 10000 + last_match_idx;
-            let file_path = self.results[current_file_idx].file_path.clone();
-            let line_number = self.results[current_file_idx].matches[last_match_idx].line_number;
+            let file_path = self.grep_state.results[current_file_idx].file_path.clone();
+            let line_number = self.grep_state.results[current_file_idx].matches[last_match_idx].line_number;
             self.select_match_with_keyboard(result_id, &file_path, line_number);
         }
     }
 
     fn select_next_file(&mut self) {
-        if self.results.is_empty() {
+        if self.grep_state.results.is_empty() {
             return;
         }
 
-        let current_id = self.selected_result.unwrap_or(0);
+        let current_id = self.grep_state.selected_result.unwrap_or(0);
         let current_file_idx = current_id / 10000;
 
         // Move to first match in next file
-        for file_idx in (current_file_idx + 1)..self.results.len() {
-            if !self.results[file_idx].matches.is_empty() {
+        for file_idx in (current_file_idx + 1)..self.grep_state.results.len() {
+            if !self.grep_state.results[file_idx].matches.is_empty() {
                 let next_id = file_idx * 10000;
-                let file_path = self.results[file_idx].file_path.clone();
-                let line_number = self.results[file_idx].matches[0].line_number;
+                let file_path = self.grep_state.results[file_idx].file_path.clone();
+                let line_number = self.grep_state.results[file_idx].matches[0].line_number;
                 self.select_match_with_keyboard(next_id, &file_path, line_number);
                 return;
             }
         }
 
         // Wrap to first file
-        for file_idx in 0..self.results.len() {
-            if !self.results[file_idx].matches.is_empty() {
+        for file_idx in 0..self.grep_state.results.len() {
+            if !self.grep_state.results[file_idx].matches.is_empty() {
                 let next_id = file_idx * 10000;
-                let file_path = self.results[file_idx].file_path.clone();
-                let line_number = self.results[file_idx].matches[0].line_number;
+                let file_path = self.grep_state.results[file_idx].file_path.clone();
+                let line_number = self.grep_state.results[file_idx].matches[0].line_number;
                 self.select_match_with_keyboard(next_id, &file_path, line_number);
                 return;
             }
@@ -598,30 +571,30 @@ impl VisGrepApp {
     }
 
     fn select_previous_file(&mut self) {
-        if self.results.is_empty() {
+        if self.grep_state.results.is_empty() {
             return;
         }
 
-        let current_id = self.selected_result.unwrap_or(0);
+        let current_id = self.grep_state.selected_result.unwrap_or(0);
         let current_file_idx = current_id / 10000;
 
         // Move to first match in previous file
         for file_idx in (0..current_file_idx).rev() {
-            if !self.results[file_idx].matches.is_empty() {
+            if !self.grep_state.results[file_idx].matches.is_empty() {
                 let prev_id = file_idx * 10000;
-                let file_path = self.results[file_idx].file_path.clone();
-                let line_number = self.results[file_idx].matches[0].line_number;
+                let file_path = self.grep_state.results[file_idx].file_path.clone();
+                let line_number = self.grep_state.results[file_idx].matches[0].line_number;
                 self.select_match_with_keyboard(prev_id, &file_path, line_number);
                 return;
             }
         }
 
         // Wrap to last file
-        for file_idx in (0..self.results.len()).rev() {
-            if !self.results[file_idx].matches.is_empty() {
+        for file_idx in (0..self.grep_state.results.len()).rev() {
+            if !self.grep_state.results[file_idx].matches.is_empty() {
                 let prev_id = file_idx * 10000;
-                let file_path = self.results[file_idx].file_path.clone();
-                let line_number = self.results[file_idx].matches[0].line_number;
+                let file_path = self.grep_state.results[file_idx].file_path.clone();
+                let line_number = self.grep_state.results[file_idx].matches[0].line_number;
                 self.select_match_with_keyboard(prev_id, &file_path, line_number);
                 return;
             }
@@ -629,43 +602,43 @@ impl VisGrepApp {
     }
 
     fn select_previous_match(&mut self) {
-        if self.results.is_empty() {
+        if self.grep_state.results.is_empty() {
             return;
         }
 
-        let current_id = self.selected_result.unwrap_or(0);
+        let current_id = self.grep_state.selected_result.unwrap_or(0);
         let current_file_idx = current_id / 10000;
         let current_match_idx = current_id % 10000;
 
         // Try previous match in current file
         if current_match_idx > 0 {
             let prev_id = current_file_idx * 10000 + current_match_idx - 1;
-            let file_path = self.results[current_file_idx].file_path.clone();
+            let file_path = self.grep_state.results[current_file_idx].file_path.clone();
             let line_number =
-                self.results[current_file_idx].matches[current_match_idx - 1].line_number;
+                self.grep_state.results[current_file_idx].matches[current_match_idx - 1].line_number;
             self.select_match_with_keyboard(prev_id, &file_path, line_number);
             return;
         }
 
         // Move to last match in previous file
         for file_idx in (0..current_file_idx).rev() {
-            if !self.results[file_idx].matches.is_empty() {
-                let last_match_idx = self.results[file_idx].matches.len() - 1;
+            if !self.grep_state.results[file_idx].matches.is_empty() {
+                let last_match_idx = self.grep_state.results[file_idx].matches.len() - 1;
                 let prev_id = file_idx * 10000 + last_match_idx;
-                let file_path = self.results[file_idx].file_path.clone();
-                let line_number = self.results[file_idx].matches[last_match_idx].line_number;
+                let file_path = self.grep_state.results[file_idx].file_path.clone();
+                let line_number = self.grep_state.results[file_idx].matches[last_match_idx].line_number;
                 self.select_match_with_keyboard(prev_id, &file_path, line_number);
                 return;
             }
         }
 
         // Wrap to last match in last file
-        for file_idx in (0..self.results.len()).rev() {
-            if !self.results[file_idx].matches.is_empty() {
-                let last_match_idx = self.results[file_idx].matches.len() - 1;
+        for file_idx in (0..self.grep_state.results.len()).rev() {
+            if !self.grep_state.results[file_idx].matches.is_empty() {
+                let last_match_idx = self.grep_state.results[file_idx].matches.len() - 1;
                 let last_id = file_idx * 10000 + last_match_idx;
-                let file_path = self.results[file_idx].file_path.clone();
-                let line_number = self.results[file_idx].matches[last_match_idx].line_number;
+                let file_path = self.grep_state.results[file_idx].file_path.clone();
+                let line_number = self.grep_state.results[file_idx].matches[last_match_idx].line_number;
                 self.select_match_with_keyboard(last_id, &file_path, line_number);
                 return;
             }
@@ -673,12 +646,12 @@ impl VisGrepApp {
     }
 
     fn render_results(&mut self, ui: &mut egui::Ui) {
-        let filter = self.results_filter.to_lowercase();
+        let filter = self.grep_state.results_filter.to_lowercase();
         let mut clicked_match: Option<(usize, std::path::PathBuf, usize)> = None;
         let should_scroll = self.scroll_to_selected_result;
         self.scroll_to_selected_result = false; // Reset flag
 
-        for (file_idx, result) in self.results.iter().enumerate() {
+        for (file_idx, result) in self.grep_state.results.iter().enumerate() {
             let file_name = result
                 .file_path
                 .file_name()
@@ -691,7 +664,7 @@ impl VisGrepApp {
             }
 
             // Get current open state, default to true if not set
-            let is_open = *self.collapsing_state.get(&file_idx).unwrap_or(&true);
+            let is_open = *self.grep_state.collapsing_state.get(&file_idx).unwrap_or(&true);
 
             let header_id = ui.make_persistent_id(format!("header_{}", file_idx));
 
@@ -716,7 +689,7 @@ impl VisGrepApp {
                 .body(|ui| {
                     for (match_idx, m) in result.matches.iter().enumerate() {
                         let result_id = file_idx * 10000 + match_idx;
-                        let is_selected = self.selected_result == Some(result_id);
+                        let is_selected = self.grep_state.selected_result == Some(result_id);
 
                         let label = format!("  Line {}: {}", m.line_number, m.line_text.trim());
 
@@ -740,7 +713,7 @@ impl VisGrepApp {
                 header_id,
                 is_open,
             );
-            self.collapsing_state
+            self.grep_state.collapsing_state
                 .insert(file_idx, updated_state.is_open());
         }
 
@@ -753,9 +726,9 @@ impl VisGrepApp {
     fn render_preview(&mut self, ui: &mut egui::Ui) {
         if let Some(preview_text) = &self.preview.content {
             // Check if we should try syntax highlighting based on selected result
-            let should_highlight = if let Some(selected_id) = self.selected_result {
+            let should_highlight = if let Some(selected_id) = self.grep_state.selected_result {
                 let file_idx = selected_id / 10000;
-                self.results
+                self.grep_state.results
                     .get(file_idx)
                     .map(|r| self.should_highlight_file(&r.file_path))
                     .unwrap_or(false)
@@ -807,10 +780,10 @@ impl VisGrepApp {
             let highlight_bg = Color32::from_rgb(80, 60, 40); // Brown background
 
             // Use highlight pattern if specified, otherwise use search query
-            let pattern_to_use = if !self.fix_highlight_pattern.is_empty() {
-                &self.fix_highlight_pattern
+            let pattern_to_use = if !self.grep_state.fix_highlight_pattern.is_empty() {
+                &self.grep_state.fix_highlight_pattern
             } else {
-                &self.search_query
+                &self.grep_state.search_query
             };
 
             let has_pattern = !pattern_to_use.is_empty();
@@ -926,7 +899,7 @@ impl VisGrepApp {
     /// Render the header with title and status indicators
     fn render_header(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.heading("VisGrep - Fast Search Tool");
+            ui.heading("VisGrep");
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // Show pending input state (e.g., "3" or "g")
@@ -944,21 +917,139 @@ impl VisGrepApp {
         });
     }
 
+    /// Render mode selector tabs
+    fn render_mode_tabs(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.mode, AppMode::Grep, "🔍 Grep Mode");
+            ui.selectable_value(&mut self.mode, AppMode::Tail, "📄 Tail Mode");
+        });
+    }
+
+    /// Render Grep mode UI
+    fn render_grep_mode(&mut self, ui: &mut egui::Ui) {
+        // Search controls
+        self.render_highlight_pattern_field(ui);
+        ui.separator();
+
+        self.render_search_path_field(ui);
+        ui.separator();
+
+        self.render_search_query_field(ui);
+        ui.separator();
+
+        // File age filter
+        self.render_file_age_filter(ui);
+        ui.separator();
+
+        // Results filter and expand/collapse controls
+        ui.horizontal(|ui| {
+            ui.label("Filter Results:");
+            ui.add(egui::TextEdit::singleline(&mut self.grep_state.results_filter).desired_width(300.0));
+            if ui.small_button("Clear").clicked() {
+                self.grep_state.results_filter.clear();
+            }
+
+            ui.separator();
+
+            if ui.button("Expand All").clicked() {
+                for i in 0..self.grep_state.results.len() {
+                    self.grep_state.collapsing_state.insert(i, true);
+                }
+            }
+            if ui.button("Collapse All").clicked() {
+                for i in 0..self.grep_state.results.len() {
+                    self.grep_state.collapsing_state.insert(i, false);
+                }
+            }
+        });
+        ui.separator();
+
+        // Main content area - results and preview
+        let available_height = ui.available_height();
+
+        // Results panel (40% of available height)
+        egui::ScrollArea::vertical()
+            .id_salt("results_scroll")
+            .max_height(available_height * 0.4)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                if self.grep_state.searching {
+                    ui.label("Searching...");
+                } else if self.grep_state.results.is_empty() && !self.grep_state.search_query.is_empty() {
+                    ui.label("No results found");
+                } else {
+                    self.render_results(ui);
+                }
+            });
+
+        ui.separator();
+
+        // Matched Line Focus Panel
+        ui.label("Matched Line:");
+        egui::Frame::none()
+            .fill(egui::Color32::from_rgb(40, 40, 50))
+            .inner_margin(egui::Margin::same(8.0))
+            .show(ui, |ui| {
+                self.render_matched_line_focus(ui);
+            });
+
+        ui.separator();
+
+        // Preview panel (remaining space)
+        ui.label("Preview:");
+
+        let remaining_height = ui.available_height();
+
+        let mut scroll_area = egui::ScrollArea::vertical()
+            .id_salt("preview_scroll")
+            .max_height(remaining_height)
+            .auto_shrink([false, false]);
+
+        // Only force scroll position when a new match is selected
+        if self.should_scroll_to_match {
+            scroll_area =
+                scroll_area.scroll_offset(egui::Vec2::new(0.0, self.preview_scroll_offset));
+            self.should_scroll_to_match = false; // Reset flag after applying
+        }
+
+        scroll_area.show(ui, |ui| {
+            self.render_preview(ui);
+        });
+    }
+
+    /// Render Tail mode UI (placeholder)
+    fn render_tail_mode(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Tail Mode");
+        ui.separator();
+
+        ui.label("Tail mode is coming soon!");
+        ui.add_space(10.0);
+
+        ui.label("This will allow you to:");
+        ui.label("  • Monitor multiple files in real-time (like tail -f)");
+        ui.label("  • See activity indicators for active files");
+        ui.label("  • Filter live output with regex patterns");
+        ui.label("  • Watch files on network shares reliably");
+
+        ui.add_space(20.0);
+        ui.label(format!("Placeholder: {}", self.tail_state.placeholder));
+    }
+
     /// Render the highlight pattern field
     fn render_highlight_pattern_field(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label("Highlight pattern in Matched Line (e.g., 150= or fn):");
             let response = ui.add(
-                egui::TextEdit::singleline(&mut self.fix_highlight_pattern)
+                egui::TextEdit::singleline(&mut self.grep_state.fix_highlight_pattern)
                     .desired_width(150.0)
                     .hint_text("uses search query if empty"),
             );
 
             // Show active indicator
-            let active_pattern = if !self.fix_highlight_pattern.is_empty() {
-                &self.fix_highlight_pattern
+            let active_pattern = if !self.grep_state.fix_highlight_pattern.is_empty() {
+                &self.grep_state.fix_highlight_pattern
             } else {
-                &self.search_query
+                &self.grep_state.search_query
             };
 
             if !active_pattern.is_empty() {
@@ -969,12 +1060,15 @@ impl VisGrepApp {
             }
 
             if ui.small_button("Clear").clicked() {
-                self.fix_highlight_pattern.clear();
+                self.grep_state.fix_highlight_pattern.clear();
             }
 
             // Log when pattern changes
             if response.changed() {
-                info!("Highlight pattern changed to: '{}'", self.fix_highlight_pattern);
+                info!(
+                    "Highlight pattern changed to: '{}'",
+                    self.grep_state.fix_highlight_pattern
+                );
             }
         });
     }
@@ -983,7 +1077,7 @@ impl VisGrepApp {
     fn render_search_path_field(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label("Search Path:");
-            ui.add(egui::TextEdit::singleline(&mut self.search_path).desired_width(350.0));
+            ui.add(egui::TextEdit::singleline(&mut self.grep_state.search_path).desired_width(350.0));
 
             // Preset folders dropdown
             egui::ComboBox::from_id_salt("folder_presets")
@@ -992,23 +1086,23 @@ impl VisGrepApp {
                 .show_ui(ui, |ui| {
                     for preset in &self.config.folder_presets {
                         if ui.selectable_label(false, &preset.name).clicked() {
-                            self.search_path = Self::expand_tilde(&preset.path);
-                            info!("Selected preset: {} -> {}", preset.name, self.search_path);
+                            self.grep_state.search_path = Self::expand_tilde(&preset.path);
+                            info!("Selected preset: {} -> {}", preset.name, self.grep_state.search_path);
                         }
                     }
                 });
 
             if ui.button("Current Dir").clicked() {
                 if let Ok(cwd) = std::env::current_dir() {
-                    self.search_path = cwd.display().to_string();
+                    self.grep_state.search_path = cwd.display().to_string();
                 }
             }
 
             if ui.button("Browse...").clicked() {
                 match rfd::FileDialog::new().pick_folder() {
                     Some(path) => {
-                        self.search_path = path.display().to_string();
-                        info!("Selected folder: {}", self.search_path);
+                        self.grep_state.search_path = path.display().to_string();
+                        info!("Selected folder: {}", self.grep_state.search_path);
                     }
                     None => {
                         info!("Browse dialog cancelled or unavailable");
@@ -1017,9 +1111,9 @@ impl VisGrepApp {
             }
 
             ui.label("File Pattern:");
-            ui.add(egui::TextEdit::singleline(&mut self.file_pattern).desired_width(150.0));
+            ui.add(egui::TextEdit::singleline(&mut self.grep_state.file_pattern).desired_width(150.0));
             if ui.small_button("Clear").clicked() {
-                self.file_pattern.clear();
+                self.grep_state.file_pattern.clear();
             }
         });
     }
@@ -1029,7 +1123,7 @@ impl VisGrepApp {
         ui.horizontal(|ui| {
             ui.label("Search Query:");
             let response =
-                ui.add(egui::TextEdit::singleline(&mut self.search_query).desired_width(300.0));
+                ui.add(egui::TextEdit::singleline(&mut self.grep_state.search_query).desired_width(300.0));
 
             // Saved patterns dropdown
             if !self.config.saved_patterns.is_empty() {
@@ -1038,20 +1132,22 @@ impl VisGrepApp {
 
             // Debounced auto-search: trigger search 500ms after typing stops
             if response.changed() {
-                self.pending_search = true;
-                self.last_search_time = Instant::now();
+                self.grep_state.pending_search = true;
+                self.grep_state.last_search_time = Instant::now();
             }
 
-            if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                && !self.search_query.is_empty() {
-                    self.perform_search();
-                }
+            if response.lost_focus()
+                && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                && !self.grep_state.search_query.is_empty()
+            {
+                self.perform_search();
+            }
 
-            ui.checkbox(&mut self.case_sensitive, "Case Sensitive");
-            ui.checkbox(&mut self.use_regex, "Regex");
-            ui.checkbox(&mut self.recursive, "Recursive");
+            ui.checkbox(&mut self.grep_state.case_sensitive, "Case Sensitive");
+            ui.checkbox(&mut self.grep_state.use_regex, "Regex");
+            ui.checkbox(&mut self.grep_state.recursive, "Recursive");
 
-            if ui.button("Search").clicked() && !self.search_query.is_empty() {
+            if ui.button("Search").clicked() && !self.grep_state.search_query.is_empty() {
                 self.perform_search();
             }
         });
@@ -1100,7 +1196,7 @@ impl VisGrepApp {
                             }
 
                             if button.clicked() {
-                                self.search_query = pattern.pattern.clone();
+                                self.grep_state.search_query = pattern.pattern.clone();
                                 info!("Loaded pattern: {} -> {}", pattern.name, pattern.pattern);
                             }
                         }
@@ -1117,20 +1213,16 @@ impl VisGrepApp {
     fn render_file_age_filter(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label("File Age:");
-            let mut enabled = self.file_age_hours.is_some();
+            let mut enabled = self.grep_state.file_age_hours.is_some();
             ui.checkbox(&mut enabled, "Filter by age");
 
             if enabled {
-                let mut hours = self.file_age_hours.unwrap_or(24);
-                ui.add(
-                    egui::DragValue::new(&mut hours)
-                        .speed(1.0)
-                        .range(1..=8760),
-                );
+                let mut hours = self.grep_state.file_age_hours.unwrap_or(24);
+                ui.add(egui::DragValue::new(&mut hours).speed(1.0).range(1..=8760));
                 ui.label("hours");
-                self.file_age_hours = Some(hours);
+                self.grep_state.file_age_hours = Some(hours);
             } else {
-                self.file_age_hours = None;
+                self.grep_state.file_age_hours = None;
             }
 
             if ui.small_button("?").clicked() {
@@ -1142,12 +1234,15 @@ impl VisGrepApp {
     /// Render status bar showing search stats
     fn render_status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            let total_matches: usize = self.results.iter().map(|r| r.matches.len()).sum();
-            let file_count = self.results.len();
+            let total_matches: usize = self.grep_state.results.iter().map(|r| r.matches.len()).sum();
+            let file_count = self.grep_state.results.len();
 
-            ui.label(format!("Found {} matches in {} files", total_matches, file_count));
+            ui.label(format!(
+                "Found {} matches in {} files",
+                total_matches, file_count
+            ));
 
-            if self.searching {
+            if self.grep_state.searching {
                 ui.spinner();
                 ui.label("Searching...");
             }

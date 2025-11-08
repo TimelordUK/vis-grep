@@ -98,7 +98,8 @@ impl SearchEngine {
             .replace("?", ".");
 
         Regex::new(&format!("^{}$", pattern_regex))
-            .ok().map(|re| re.is_match(file_name))
+            .ok()
+            .map(|re| re.is_match(file_name))
             .unwrap_or(false)
     }
 

@@ -255,10 +255,11 @@ impl InputHandler {
             }
             // Escape to cancel pending commands
             else if i.key_pressed(egui::Key::Escape)
-                && (!self.pending_keys.is_empty() || !self.count_buffer.is_empty()) {
-                    info!("Cancelled pending command");
-                    self.reset();
-                }
+                && (!self.pending_keys.is_empty() || !self.count_buffer.is_empty())
+            {
+                info!("Cancelled pending command");
+                self.reset();
+            }
         });
 
         command
