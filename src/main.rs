@@ -1504,7 +1504,7 @@ impl VisGrepApp {
                             // Filename (selectable for preview, fixed width)
                             let selected = self.tail_state.preview_selected_file == Some(idx);
                             ui.allocate_ui_with_layout(
-                                egui::Vec2::new(150.0, 20.0),
+                                egui::Vec2::new(400.0, 20.0),
                                 egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
                                     if ui.selectable_label(selected, &file.display_name).clicked() {
