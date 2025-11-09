@@ -136,7 +136,7 @@ impl GrepState {
 
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{BufReader, BufRead, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ThrottleState {
@@ -216,10 +216,7 @@ impl TailedFile {
             file.seek(SeekFrom::Start(self.last_position))?;
 
             let reader = BufReader::new(file);
-            let new_lines: Vec<String> = reader
-                .lines()
-                .filter_map(|l| l.ok())
-                .collect();
+            let new_lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
 
             let bytes_read = current_size - self.last_position;
             self.total_bytes_read += bytes_read;
@@ -249,8 +246,8 @@ struct LogLine {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum PreviewMode {
-    Following,  // Auto-scroll to bottom, show last N lines
-    Paused,     // Manual navigation
+    Following, // Auto-scroll to bottom, show last N lines
+    Paused,    // Manual navigation
 }
 
 struct TailState {
@@ -404,7 +401,10 @@ impl VisGrepApp {
 
         info!(
             "Starting search: path='{}', pattern='{}', query='{}', file_age={:?}hrs",
-            &expanded_path, &self.grep_state.file_pattern, &self.grep_state.search_query, &self.grep_state.file_age_hours
+            &expanded_path,
+            &self.grep_state.file_pattern,
+            &self.grep_state.search_query,
+            &self.grep_state.file_age_hours
         );
         self.grep_state.searching = true;
         self.grep_state.pending_search = false;
@@ -422,7 +422,11 @@ impl VisGrepApp {
         info!(
             "Search completed in {:.2}s: found {} matches in {} files",
             duration.as_secs_f64(),
-            self.grep_state.results.iter().map(|r| r.matches.len()).sum::<usize>(),
+            self.grep_state
+                .results
+                .iter()
+                .map(|r| r.matches.len())
+                .sum::<usize>(),
             self.grep_state.results.len()
         );
         self.grep_state.searching = false;
@@ -452,7 +456,7 @@ impl VisGrepApp {
         self.tail_state.last_poll_time = now;
 
         // Poll each file
-        for file in &mut self.tail_state.files {
+        for (file_idx, file) in self.tail_state.files.iter_mut().enumerate() {
             if file.paused {
                 continue;
             }
@@ -477,14 +481,27 @@ impl VisGrepApp {
                             self.tail_state.total_lines_received += 1;
 
                             // Trim buffer if over capacity
-                            if self.tail_state.output_buffer.len() > self.tail_state.max_buffer_lines {
+                            if self.tail_state.output_buffer.len()
+                                > self.tail_state.max_buffer_lines
+                            {
                                 self.tail_state.output_buffer.pop_front();
                                 self.tail_state.lines_dropped += 1;
                             }
                         }
+
+                        // If preview is in Following mode and showing this file, reload it
+                        if self.tail_state.preview_mode == PreviewMode::Following {
+                            if let Some(preview_idx) = self.tail_state.preview_selected_file {
+                                if file_idx == preview_idx {
+                                    self.tail_state.preview_needs_reload = true;
+                                }
+                            }
+                        }
                     } else {
                         // Mark as idle after 2 seconds
-                        if now.duration_since(file.last_activity) > std::time::Duration::from_secs(2) {
+                        if now.duration_since(file.last_activity)
+                            > std::time::Duration::from_secs(2)
+                        {
                             file.is_active = false;
                             file.lines_since_last_read = 0;
                         }
@@ -529,7 +546,8 @@ impl VisGrepApp {
             let file = File::open(path)?;
             let reader = BufReader::new(file);
 
-            let mut lines: VecDeque<String> = VecDeque::with_capacity(self.tail_state.preview_follow_lines);
+            let mut lines: VecDeque<String> =
+                VecDeque::with_capacity(self.tail_state.preview_follow_lines);
 
             for line in reader.lines() {
                 if let Ok(line_str) = line {
@@ -583,7 +601,8 @@ impl eframe::App for VisGrepApp {
             AppMode::Grep => {
                 // Debounced search handling
                 if self.grep_state.pending_search
-                    && self.grep_state.last_search_time.elapsed() > std::time::Duration::from_millis(500)
+                    && self.grep_state.last_search_time.elapsed()
+                        > std::time::Duration::from_millis(500)
                     && !self.grep_state.search_query.is_empty()
                 {
                     self.perform_search();
@@ -592,6 +611,46 @@ impl eframe::App for VisGrepApp {
             AppMode::Tail => {
                 // Poll files for updates
                 self.poll_tail_files();
+
+                // Handle preview navigation (if a file is selected)
+                if self.tail_state.preview_selected_file.is_some() {
+                    ctx.input(|i| {
+                        // j - scroll down
+                        if i.key_pressed(egui::Key::J) && !i.modifiers.ctrl {
+                            self.tail_state.preview_scroll_offset += 20.0;
+                            self.tail_state.preview_mode = PreviewMode::Paused;
+                        }
+                        // k - scroll up
+                        if i.key_pressed(egui::Key::K) && !i.modifiers.ctrl {
+                            self.tail_state.preview_scroll_offset =
+                                (self.tail_state.preview_scroll_offset - 20.0).max(0.0);
+                            self.tail_state.preview_mode = PreviewMode::Paused;
+                        }
+                        // g - handle gg (jump to top) or G (jump to bottom and follow)
+                        if i.key_pressed(egui::Key::G) {
+                            if i.modifiers.shift {
+                                // Shift+G - jump to end and resume following
+                                self.tail_state.preview_mode = PreviewMode::Following;
+                                self.tail_state.preview_scroll_offset = 0.0;
+                            } else {
+                                // g (will be gg with double-tap, but for now just jump to top)
+                                self.tail_state.preview_scroll_offset = 0.0;
+                                self.tail_state.preview_mode = PreviewMode::Paused;
+                            }
+                        }
+                        // Ctrl+D - page down
+                        if i.key_pressed(egui::Key::D) && i.modifiers.ctrl {
+                            self.tail_state.preview_scroll_offset += 400.0;
+                            self.tail_state.preview_mode = PreviewMode::Paused;
+                        }
+                        // Ctrl+U - page up
+                        if i.key_pressed(egui::Key::U) && i.modifiers.ctrl {
+                            self.tail_state.preview_scroll_offset =
+                                (self.tail_state.preview_scroll_offset - 400.0).max(0.0);
+                            self.tail_state.preview_mode = PreviewMode::Paused;
+                        }
+                    });
+                }
             }
         }
 
@@ -641,8 +700,9 @@ impl VisGrepApp {
         {
             let next_id = current_file_idx * 10000 + current_match_idx + 1;
             let file_path = self.grep_state.results[current_file_idx].file_path.clone();
-            let line_number =
-                self.grep_state.results[current_file_idx].matches[current_match_idx + 1].line_number;
+            let line_number = self.grep_state.results[current_file_idx].matches
+                [current_match_idx + 1]
+                .line_number;
             self.select_match_with_keyboard(next_id, &file_path, line_number);
             return;
         }
@@ -717,7 +777,9 @@ impl VisGrepApp {
             let file_idx = result_id / 10000;
             let match_idx = result_id % 10000;
 
-            if file_idx < self.grep_state.results.len() && match_idx < self.grep_state.results[file_idx].matches.len() {
+            if file_idx < self.grep_state.results.len()
+                && match_idx < self.grep_state.results[file_idx].matches.len()
+            {
                 let file_path = self.grep_state.results[file_idx].file_path.clone();
                 let line_number = self.grep_state.results[file_idx].matches[match_idx].line_number;
                 self.select_match_with_keyboard(result_id, &file_path, line_number);
@@ -859,7 +921,8 @@ impl VisGrepApp {
                 let last_match_idx = self.grep_state.results[file_idx].matches.len() - 1;
                 let result_id = file_idx * 10000 + last_match_idx;
                 let file_path = self.grep_state.results[file_idx].file_path.clone();
-                let line_number = self.grep_state.results[file_idx].matches[last_match_idx].line_number;
+                let line_number =
+                    self.grep_state.results[file_idx].matches[last_match_idx].line_number;
                 self.select_match_with_keyboard(result_id, &file_path, line_number);
                 return;
             }
@@ -898,7 +961,8 @@ impl VisGrepApp {
             let last_match_idx = self.grep_state.results[current_file_idx].matches.len() - 1;
             let result_id = current_file_idx * 10000 + last_match_idx;
             let file_path = self.grep_state.results[current_file_idx].file_path.clone();
-            let line_number = self.grep_state.results[current_file_idx].matches[last_match_idx].line_number;
+            let line_number =
+                self.grep_state.results[current_file_idx].matches[last_match_idx].line_number;
             self.select_match_with_keyboard(result_id, &file_path, line_number);
         }
     }
@@ -978,8 +1042,9 @@ impl VisGrepApp {
         if current_match_idx > 0 {
             let prev_id = current_file_idx * 10000 + current_match_idx - 1;
             let file_path = self.grep_state.results[current_file_idx].file_path.clone();
-            let line_number =
-                self.grep_state.results[current_file_idx].matches[current_match_idx - 1].line_number;
+            let line_number = self.grep_state.results[current_file_idx].matches
+                [current_match_idx - 1]
+                .line_number;
             self.select_match_with_keyboard(prev_id, &file_path, line_number);
             return;
         }
@@ -990,7 +1055,8 @@ impl VisGrepApp {
                 let last_match_idx = self.grep_state.results[file_idx].matches.len() - 1;
                 let prev_id = file_idx * 10000 + last_match_idx;
                 let file_path = self.grep_state.results[file_idx].file_path.clone();
-                let line_number = self.grep_state.results[file_idx].matches[last_match_idx].line_number;
+                let line_number =
+                    self.grep_state.results[file_idx].matches[last_match_idx].line_number;
                 self.select_match_with_keyboard(prev_id, &file_path, line_number);
                 return;
             }
@@ -1002,7 +1068,8 @@ impl VisGrepApp {
                 let last_match_idx = self.grep_state.results[file_idx].matches.len() - 1;
                 let last_id = file_idx * 10000 + last_match_idx;
                 let file_path = self.grep_state.results[file_idx].file_path.clone();
-                let line_number = self.grep_state.results[file_idx].matches[last_match_idx].line_number;
+                let line_number =
+                    self.grep_state.results[file_idx].matches[last_match_idx].line_number;
                 self.select_match_with_keyboard(last_id, &file_path, line_number);
                 return;
             }
@@ -1028,7 +1095,11 @@ impl VisGrepApp {
             }
 
             // Get current open state, default to true if not set
-            let is_open = *self.grep_state.collapsing_state.get(&file_idx).unwrap_or(&true);
+            let is_open = *self
+                .grep_state
+                .collapsing_state
+                .get(&file_idx)
+                .unwrap_or(&true);
 
             let header_id = ui.make_persistent_id(format!("header_{}", file_idx));
 
@@ -1077,7 +1148,8 @@ impl VisGrepApp {
                 header_id,
                 is_open,
             );
-            self.grep_state.collapsing_state
+            self.grep_state
+                .collapsing_state
                 .insert(file_idx, updated_state.is_open());
         }
 
@@ -1092,7 +1164,8 @@ impl VisGrepApp {
             // Check if we should try syntax highlighting based on selected result
             let should_highlight = if let Some(selected_id) = self.grep_state.selected_result {
                 let file_idx = selected_id / 10000;
-                self.grep_state.results
+                self.grep_state
+                    .results
                     .get(file_idx)
                     .map(|r| self.should_highlight_file(&r.file_path))
                     .unwrap_or(false)
@@ -1308,7 +1381,10 @@ impl VisGrepApp {
         // Results filter and expand/collapse controls
         ui.horizontal(|ui| {
             ui.label("Filter Results:");
-            ui.add(egui::TextEdit::singleline(&mut self.grep_state.results_filter).desired_width(300.0));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.grep_state.results_filter)
+                    .desired_width(300.0),
+            );
             if ui.small_button("Clear").clicked() {
                 self.grep_state.results_filter.clear();
             }
@@ -1339,7 +1415,9 @@ impl VisGrepApp {
             .show(ui, |ui| {
                 if self.grep_state.searching {
                     ui.label("Searching...");
-                } else if self.grep_state.results.is_empty() && !self.grep_state.search_query.is_empty() {
+                } else if self.grep_state.results.is_empty()
+                    && !self.grep_state.search_query.is_empty()
+                {
                     ui.label("No results found");
                 } else {
                     self.render_results(ui);
@@ -1387,7 +1465,14 @@ impl VisGrepApp {
         ui.horizontal(|ui| {
             ui.label("Files Being Monitored:");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(if self.tail_state.paused_all { "▶ Resume All" } else { "⏸ Pause All" }).clicked() {
+                if ui
+                    .button(if self.tail_state.paused_all {
+                        "▶ Resume All"
+                    } else {
+                        "⏸ Pause All"
+                    })
+                    .clicked()
+                {
                     self.tail_state.paused_all = !self.tail_state.paused_all;
                 }
             });
@@ -1407,7 +1492,7 @@ impl VisGrepApp {
                 } else {
                     for (idx, file) in self.tail_state.files.iter_mut().enumerate() {
                         ui.horizontal(|ui| {
-                            // Activity indicator
+                            // Activity indicator (fixed width)
                             let indicator = if file.is_active { "●" } else { "○" };
                             let color = if file.is_active {
                                 egui::Color32::from_rgb(0, 255, 0)
@@ -1416,29 +1501,62 @@ impl VisGrepApp {
                             };
                             ui.colored_label(color, indicator);
 
-                            // Filename (selectable for preview)
+                            // Filename (selectable for preview, fixed width)
                             let selected = self.tail_state.preview_selected_file == Some(idx);
-                            if ui.selectable_label(selected, &file.display_name).clicked() {
-                                self.tail_state.preview_selected_file = Some(idx);
-                                self.tail_state.preview_needs_reload = true;
-                                self.tail_state.preview_mode = PreviewMode::Following;
-                            }
+                            ui.allocate_ui_with_layout(
+                                egui::Vec2::new(150.0, 20.0),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    if ui.selectable_label(selected, &file.display_name).clicked() {
+                                        self.tail_state.preview_selected_file = Some(idx);
+                                        self.tail_state.preview_needs_reload = true;
+                                        self.tail_state.preview_mode = PreviewMode::Following;
+                                    }
+                                },
+                            );
 
-                            // Size
-                            ui.label(format!("{:.1} KB", file.last_size as f64 / 1024.0));
+                            // Size (fixed width)
+                            ui.allocate_ui_with_layout(
+                                egui::Vec2::new(70.0, 20.0),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    ui.label(format!("{:.1} KB", file.last_size as f64 / 1024.0));
+                                },
+                            );
 
-                            // Activity info
-                            if file.is_active && file.lines_since_last_read > 0 {
-                                ui.colored_label(
-                                    egui::Color32::from_rgb(255, 200, 100),
-                                    format!("(+{} lines)", file.lines_since_last_read)
-                                );
+                            // Activity info (fixed width for consistent button position)
+                            let activity_text = if file.is_active && file.lines_since_last_read > 0
+                            {
+                                format!("(+{} lines)", file.lines_since_last_read)
                             } else if !file.is_active {
-                                ui.label("(idle)");
-                            }
+                                "(idle)".to_string()
+                            } else {
+                                "".to_string()
+                            };
 
-                            // Individual pause button
-                            if ui.small_button(if file.paused { "▶" } else { "⏸" }).clicked() {
+                            ui.allocate_ui_with_layout(
+                                egui::Vec2::new(100.0, 20.0),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    ui.add_sized(
+                                        egui::Vec2::new(100.0, 20.0),
+                                        egui::Label::new(
+                                            if file.is_active && file.lines_since_last_read > 0 {
+                                                egui::RichText::new(&activity_text)
+                                                    .color(egui::Color32::from_rgb(255, 200, 100))
+                                            } else {
+                                                egui::RichText::new(&activity_text)
+                                            },
+                                        ),
+                                    );
+                                },
+                            );
+
+                            // Individual pause button (now always in the same position)
+                            if ui
+                                .small_button(if file.paused { "▶" } else { "⏸" })
+                                .clicked()
+                            {
                                 file.paused = !file.paused;
                             }
                         });
@@ -1448,12 +1566,48 @@ impl VisGrepApp {
 
         ui.separator();
 
+        // Split view: Output (left) and Preview (right)
+        let available_height = ui.available_height();
+
+        ui.horizontal(|ui| {
+            // Left: Combined output (50% width)
+            let half_width = ui.available_width() * 0.5;
+            ui.allocate_ui_with_layout(
+                egui::Vec2::new(half_width, available_height),
+                egui::Layout::top_down(egui::Align::LEFT),
+                |ui| {
+                    self.render_tail_output(ui);
+                },
+            );
+
+            ui.separator();
+
+            // Right: File preview (remaining width)
+            ui.allocate_ui_with_layout(
+                egui::Vec2::new(ui.available_width(), available_height),
+                egui::Layout::top_down(egui::Align::LEFT),
+                |ui| {
+                    self.render_tail_preview(ui);
+                },
+            );
+        });
+    }
+
+    /// Render the combined output panel for tail mode
+    fn render_tail_output(&mut self, ui: &mut egui::Ui) {
         // Output header
         ui.horizontal(|ui| {
-            ui.label("Output:");
+            ui.label("Output (Combined):");
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(if self.tail_state.paused_all { "▶" } else { "⏸" }).clicked() {
+                if ui
+                    .button(if self.tail_state.paused_all {
+                        "▶"
+                    } else {
+                        "⏸"
+                    })
+                    .clicked()
+                {
                     self.tail_state.paused_all = !self.tail_state.paused_all;
                 }
                 if ui.button("Clear").clicked() {
@@ -1504,9 +1658,11 @@ impl VisGrepApp {
             }
 
             if self.tail_state.output_buffer.is_empty() {
-                ui.label(egui::RichText::new("Waiting for log output...")
-                    .italics()
-                    .color(egui::Color32::GRAY));
+                ui.label(
+                    egui::RichText::new("Waiting for log output...")
+                        .italics()
+                        .color(egui::Color32::GRAY),
+                );
             }
         });
 
@@ -1518,14 +1674,16 @@ impl VisGrepApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let buffer_pct = if self.tail_state.max_buffer_lines > 0 {
                     (self.tail_state.output_buffer.len() as f32
-                        / self.tail_state.max_buffer_lines as f32) * 100.0
+                        / self.tail_state.max_buffer_lines as f32)
+                        * 100.0
                 } else {
                     0.0
                 };
 
                 let active_count = self.tail_state.files.iter().filter(|f| f.is_active).count();
 
-                ui.label(format!("Files: {}  Active: {}  Lines: {} / {}  Buffer: {:.1}%",
+                ui.label(format!(
+                    "Files: {}  Active: {}  Lines: {} / {}  Buffer: {:.1}%",
                     self.tail_state.files.len(),
                     active_count,
                     self.tail_state.output_buffer.len(),
@@ -1536,11 +1694,142 @@ impl VisGrepApp {
                 if self.tail_state.lines_dropped > 0 {
                     ui.colored_label(
                         egui::Color32::YELLOW,
-                        format!("  ⚠ Dropped: {}", self.tail_state.lines_dropped)
+                        format!("  ⚠ Dropped: {}", self.tail_state.lines_dropped),
                     );
                 }
             });
         });
+    }
+
+    /// Render the preview panel for tail mode
+    fn render_tail_preview(&mut self, ui: &mut egui::Ui) {
+        if let Some(file_idx) = self.tail_state.preview_selected_file {
+            if file_idx < self.tail_state.files.len() {
+                let file = &self.tail_state.files[file_idx];
+
+                // Header
+                ui.horizontal(|ui| {
+                    ui.label(format!(
+                        "Preview: {} ({:.1} KB)",
+                        file.display_name,
+                        file.last_size as f64 / 1024.0
+                    ));
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Pause/Follow toggle
+                        let (icon, color) = match self.tail_state.preview_mode {
+                            PreviewMode::Following => {
+                                ("📍 Following", egui::Color32::from_rgb(100, 255, 100))
+                            }
+                            PreviewMode::Paused => {
+                                ("⏸ Paused", egui::Color32::from_rgb(255, 200, 100))
+                            }
+                        };
+
+                        if ui.button(egui::RichText::new(icon).color(color)).clicked() {
+                            self.tail_state.preview_mode = match self.tail_state.preview_mode {
+                                PreviewMode::Following => PreviewMode::Paused,
+                                PreviewMode::Paused => PreviewMode::Following,
+                            };
+                        }
+                    });
+                });
+
+                ui.separator();
+
+                // Content area
+                let available_height = ui.available_height() - 40.0;
+
+                let scroll_area = if self.tail_state.preview_mode == PreviewMode::Following {
+                    egui::ScrollArea::vertical().stick_to_bottom(true)
+                } else {
+                    egui::ScrollArea::vertical()
+                        .scroll_offset(egui::Vec2::new(0.0, self.tail_state.preview_scroll_offset))
+                };
+
+                let scroll_output = scroll_area
+                    .id_salt("tail_preview_scroll")
+                    .max_height(available_height)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
+
+                        // Display preview content
+                        if self.tail_state.preview_content.is_empty() {
+                            ui.label(
+                                egui::RichText::new("Loading...")
+                                    .italics()
+                                    .color(egui::Color32::GRAY),
+                            );
+                        } else {
+                            for (line_num, line) in
+                                self.tail_state.preview_content.iter().enumerate()
+                            {
+                                ui.horizontal(|ui| {
+                                    // Line number
+                                    ui.label(
+                                        egui::RichText::new(format!("{:4} ", line_num + 1))
+                                            .color(egui::Color32::GRAY),
+                                    );
+                                    // Content
+                                    ui.label(line);
+                                });
+                            }
+                        }
+                    });
+
+                // Detect manual scroll (switch to Paused mode)
+                if self.tail_state.preview_mode == PreviewMode::Following {
+                    // In Following mode, we don't track manual scrolls
+                } else {
+                    // Update scroll offset
+                    self.tail_state.preview_scroll_offset = scroll_output.state.offset.y;
+                }
+
+                // Footer
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("j/k: scroll  gg/G: jump")
+                            .color(egui::Color32::GRAY)
+                            .small(),
+                    );
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if self.tail_state.preview_mode == PreviewMode::Following {
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "> Following - showing last {} lines",
+                                    self.tail_state.preview_follow_lines
+                                ))
+                                .color(egui::Color32::from_rgb(100, 255, 100)),
+                            );
+                        } else {
+                            let total_lines = self.tail_state.preview_content.len();
+                            ui.label(format!("Total lines: {}", total_lines));
+                        }
+                    });
+                });
+            } else {
+                // Invalid file index
+                ui.centered_and_justified(|ui| {
+                    ui.label(
+                        egui::RichText::new("Error: Invalid file selection")
+                            .italics()
+                            .color(egui::Color32::RED),
+                    );
+                });
+            }
+        } else {
+            // No file selected
+            ui.centered_and_justified(|ui| {
+                ui.label(
+                    egui::RichText::new("← Select a file to preview")
+                        .italics()
+                        .color(egui::Color32::GRAY),
+                );
+            });
+        }
     }
 
     /// Render the highlight pattern field
@@ -1585,7 +1874,9 @@ impl VisGrepApp {
     fn render_search_path_field(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label("Search Path:");
-            ui.add(egui::TextEdit::singleline(&mut self.grep_state.search_path).desired_width(350.0));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.grep_state.search_path).desired_width(350.0),
+            );
 
             // Preset folders dropdown
             egui::ComboBox::from_id_salt("folder_presets")
@@ -1595,7 +1886,10 @@ impl VisGrepApp {
                     for preset in &self.config.folder_presets {
                         if ui.selectable_label(false, &preset.name).clicked() {
                             self.grep_state.search_path = Self::expand_tilde(&preset.path);
-                            info!("Selected preset: {} -> {}", preset.name, self.grep_state.search_path);
+                            info!(
+                                "Selected preset: {} -> {}",
+                                preset.name, self.grep_state.search_path
+                            );
                         }
                     }
                 });
@@ -1619,7 +1913,9 @@ impl VisGrepApp {
             }
 
             ui.label("File Pattern:");
-            ui.add(egui::TextEdit::singleline(&mut self.grep_state.file_pattern).desired_width(150.0));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.grep_state.file_pattern).desired_width(150.0),
+            );
             if ui.small_button("Clear").clicked() {
                 self.grep_state.file_pattern.clear();
             }
@@ -1630,8 +1926,9 @@ impl VisGrepApp {
     fn render_search_query_field(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label("Search Query:");
-            let response =
-                ui.add(egui::TextEdit::singleline(&mut self.grep_state.search_query).desired_width(300.0));
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut self.grep_state.search_query).desired_width(300.0),
+            );
 
             // Saved patterns dropdown
             if !self.config.saved_patterns.is_empty() {
@@ -1742,7 +2039,12 @@ impl VisGrepApp {
     /// Render status bar showing search stats
     fn render_status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            let total_matches: usize = self.grep_state.results.iter().map(|r| r.matches.len()).sum();
+            let total_matches: usize = self
+                .grep_state
+                .results
+                .iter()
+                .map(|r| r.matches.len())
+                .sum();
             let file_count = self.grep_state.results.len();
 
             ui.label(format!(
@@ -1779,7 +2081,10 @@ fn main() -> eframe::Result<()> {
         None => {
             if cli.follow || !cli.files.is_empty() {
                 // -f flag or files provided without subcommand
-                info!("Starting in Tail mode (via -f flag) with files: {:?}", cli.files);
+                info!(
+                    "Starting in Tail mode (via -f flag) with files: {:?}",
+                    cli.files
+                );
                 StartupConfig {
                     mode: AppMode::Tail,
                     tail_files: cli.files,
