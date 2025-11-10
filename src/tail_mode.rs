@@ -22,6 +22,39 @@ impl VisGrepApp {
 
         ui.separator();
 
+        // Update rate control
+        ui.horizontal(|ui| {
+            ui.label("Update Rate:");
+            
+            // Pre-defined rates
+            let rates = [
+                ("Very Fast", 100),
+                ("Fast", 250),
+                ("Normal", 500),
+                ("Slow", 1000),
+                ("Very Slow", 2000),
+            ];
+            
+            for (name, ms) in &rates {
+                if ui.selectable_label(self.tail_state.poll_interval_ms == *ms, *name).clicked() {
+                    self.tail_state.poll_interval_ms = *ms;
+                }
+            }
+            
+            ui.separator();
+            ui.label(format!("{} ms", self.tail_state.poll_interval_ms));
+            
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    egui::RichText::new("(+/- to adjust)")
+                        .small()
+                        .color(egui::Color32::GRAY)
+                );
+            });
+        });
+
+        ui.separator();
+
         // File list
         egui::ScrollArea::vertical()
             .id_salt("file_list_scroll")
@@ -189,12 +222,13 @@ impl VisGrepApp {
                 let active_count = self.tail_state.files.iter().filter(|f| f.is_active).count();
 
                 ui.label(format!(
-                    "Files: {}  Active: {}  Lines: {} / {}  Buffer: {:.1}%",
+                    "Files: {}  Active: {}  Lines: {} / {}  Buffer: {:.1}%  Update: {}ms",
                     self.tail_state.files.len(),
                     active_count,
                     self.tail_state.output_buffer.len(),
                     self.tail_state.max_buffer_lines,
-                    buffer_pct
+                    buffer_pct,
+                    self.tail_state.poll_interval_ms
                 ));
 
                 if self.tail_state.lines_dropped > 0 {
@@ -339,6 +373,33 @@ impl VisGrepApp {
     }
 
     pub fn handle_tail_mode_navigation(&mut self, ctx: &egui::Context) {
+        // Handle global tail mode shortcuts
+        ctx.input(|i| {
+            // + or = - increase update rate (decrease interval)
+            if i.key_pressed(egui::Key::Plus) || 
+               (i.key_pressed(egui::Key::Equals) && !i.modifiers.shift) {
+                self.tail_state.poll_interval_ms = match self.tail_state.poll_interval_ms {
+                    ms if ms > 1000 => 1000,
+                    ms if ms > 500 => 500,
+                    ms if ms > 250 => 250,
+                    ms if ms > 100 => 100,
+                    _ => 50, // Minimum 50ms (20 updates/sec)
+                };
+            }
+            
+            // - - decrease update rate (increase interval)
+            if i.key_pressed(egui::Key::Minus) {
+                self.tail_state.poll_interval_ms = match self.tail_state.poll_interval_ms {
+                    ms if ms < 100 => 100,
+                    ms if ms < 250 => 250,
+                    ms if ms < 500 => 500,
+                    ms if ms < 1000 => 1000,
+                    ms if ms < 2000 => 2000,
+                    _ => 5000, // Maximum 5000ms (0.2 updates/sec)
+                };
+            }
+        });
+        
         // Handle preview navigation (if a file is selected)
         if self.tail_state.preview_selected_file.is_some() {
             ctx.input(|i| {
