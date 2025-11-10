@@ -10,6 +10,8 @@ mod config;
 mod input_handler;
 mod preview;
 mod search;
+mod grep_mode;
+mod tail_mode;
 
 use config::Config;
 use input_handler::{InputHandler, NavigationCommand};
@@ -575,7 +577,8 @@ impl eframe::App for VisGrepApp {
             self.handle_navigation_command(command);
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        // 1. First: ALL TopBottomPanels
+        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // Header with title and status
             self.render_header(ui);
             ui.separator();
@@ -583,74 +586,71 @@ impl eframe::App for VisGrepApp {
             // Mode selector tabs
             self.render_mode_tabs(ui);
             ui.separator();
+        });
 
-            // Render mode-specific UI
-            match self.mode {
-                AppMode::Grep => self.render_grep_mode(ui),
-                AppMode::Tail => self.render_tail_mode(ui),
-            }
-
-            ui.separator();
-
-            // Status bar
+        egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             self.render_status_bar(ui);
+        });
+
+        // Mode-specific top panels
+        match self.mode {
+            AppMode::Grep => {
+                egui::TopBottomPanel::top("grep_controls")
+                    .resizable(false)
+                    .show(ctx, |ui| {
+                        self.render_grep_mode_ui(ui);
+                    });
+            },
+            AppMode::Tail => {
+                egui::TopBottomPanel::top("tail_controls")
+                    .resizable(false)
+                    .show(ctx, |ui| {
+                        self.render_tail_mode_controls(ui);
+                    });
+            },
+        }
+
+        // 2. Second: SidePanels
+        match self.mode {
+            AppMode::Grep => {
+                egui::SidePanel::left("grep_left_panel")
+                    .resizable(true)
+                    .default_width(600.0)
+                    .width_range(300.0..=1200.0)
+                    .show(ctx, |ui| {
+                        self.render_grep_left_panel(ui);
+                    });
+            },
+            AppMode::Tail => {
+                let panel_response = egui::SidePanel::left("tail_left_panel")
+                    .resizable(true)
+                    .default_width(700.0)
+                    .width_range(400.0..=1200.0)
+                    .show(ctx, |ui| {
+                        self.render_tail_output(ui);
+                    });
+                
+                // Log panel width for debugging
+                info!("Tail left panel width: {:.0}", panel_response.response.rect.width());
+            },
+        }
+
+        // 3. Last: CentralPanel
+        egui::CentralPanel::default().show(ctx, |ui| {
+            match self.mode {
+                AppMode::Grep => self.render_grep_right_panel(ui),
+                AppMode::Tail => self.render_tail_preview(ui),
+            }
         });
 
         // Mode-specific background tasks
         match self.mode {
-            AppMode::Grep => {
-                // Debounced search handling
-                if self.grep_state.pending_search
-                    && self.grep_state.last_search_time.elapsed()
-                        > std::time::Duration::from_millis(500)
-                    && !self.grep_state.search_query.is_empty()
-                {
-                    self.perform_search();
-                }
-            }
+            AppMode::Grep => self.handle_grep_mode_background_tasks(),
             AppMode::Tail => {
                 // Poll files for updates
                 self.poll_tail_files();
-
-                // Handle preview navigation (if a file is selected)
-                if self.tail_state.preview_selected_file.is_some() {
-                    ctx.input(|i| {
-                        // j - scroll down
-                        if i.key_pressed(egui::Key::J) && !i.modifiers.ctrl {
-                            self.tail_state.preview_scroll_offset += 20.0;
-                            self.tail_state.preview_mode = PreviewMode::Paused;
-                        }
-                        // k - scroll up
-                        if i.key_pressed(egui::Key::K) && !i.modifiers.ctrl {
-                            self.tail_state.preview_scroll_offset =
-                                (self.tail_state.preview_scroll_offset - 20.0).max(0.0);
-                            self.tail_state.preview_mode = PreviewMode::Paused;
-                        }
-                        // g - handle gg (jump to top) or G (jump to bottom and follow)
-                        if i.key_pressed(egui::Key::G) {
-                            if i.modifiers.shift {
-                                // Shift+G - jump to end and resume following
-                                self.tail_state.preview_mode = PreviewMode::Following;
-                                self.tail_state.preview_scroll_offset = 0.0;
-                            } else {
-                                // g (will be gg with double-tap, but for now just jump to top)
-                                self.tail_state.preview_scroll_offset = 0.0;
-                                self.tail_state.preview_mode = PreviewMode::Paused;
-                            }
-                        }
-                        // Ctrl+D - page down
-                        if i.key_pressed(egui::Key::D) && i.modifiers.ctrl {
-                            self.tail_state.preview_scroll_offset += 400.0;
-                            self.tail_state.preview_mode = PreviewMode::Paused;
-                        }
-                        // Ctrl+U - page up
-                        if i.key_pressed(egui::Key::U) && i.modifiers.ctrl {
-                            self.tail_state.preview_scroll_offset =
-                                (self.tail_state.preview_scroll_offset - 400.0).max(0.0);
-                            self.tail_state.preview_mode = PreviewMode::Paused;
-                        }
-                    });
-                }
+                // Handle tail mode navigation
+                self.handle_tail_mode_navigation(ctx);
             }
         }
 
@@ -1362,475 +1362,8 @@ impl VisGrepApp {
         });
     }
 
-    /// Render Grep mode UI
-    fn render_grep_mode(&mut self, ui: &mut egui::Ui) {
-        // Search controls
-        self.render_highlight_pattern_field(ui);
-        ui.separator();
 
-        self.render_search_path_field(ui);
-        ui.separator();
 
-        self.render_search_query_field(ui);
-        ui.separator();
-
-        // File age filter
-        self.render_file_age_filter(ui);
-        ui.separator();
-
-        // Results filter and expand/collapse controls
-        ui.horizontal(|ui| {
-            ui.label("Filter Results:");
-            ui.add(
-                egui::TextEdit::singleline(&mut self.grep_state.results_filter)
-                    .desired_width(300.0),
-            );
-            if ui.small_button("Clear").clicked() {
-                self.grep_state.results_filter.clear();
-            }
-
-            ui.separator();
-
-            if ui.button("Expand All").clicked() {
-                for i in 0..self.grep_state.results.len() {
-                    self.grep_state.collapsing_state.insert(i, true);
-                }
-            }
-            if ui.button("Collapse All").clicked() {
-                for i in 0..self.grep_state.results.len() {
-                    self.grep_state.collapsing_state.insert(i, false);
-                }
-            }
-        });
-        ui.separator();
-
-        // Main content area - results and preview
-        let available_height = ui.available_height();
-
-        // Results panel (40% of available height)
-        egui::ScrollArea::vertical()
-            .id_salt("results_scroll")
-            .max_height(available_height * 0.4)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                if self.grep_state.searching {
-                    ui.label("Searching...");
-                } else if self.grep_state.results.is_empty()
-                    && !self.grep_state.search_query.is_empty()
-                {
-                    ui.label("No results found");
-                } else {
-                    self.render_results(ui);
-                }
-            });
-
-        ui.separator();
-
-        // Matched Line Focus Panel
-        ui.label("Matched Line:");
-        egui::Frame::none()
-            .fill(egui::Color32::from_rgb(40, 40, 50))
-            .inner_margin(egui::Margin::same(8.0))
-            .show(ui, |ui| {
-                self.render_matched_line_focus(ui);
-            });
-
-        ui.separator();
-
-        // Preview panel (remaining space)
-        ui.label("Preview:");
-
-        let remaining_height = ui.available_height();
-
-        let mut scroll_area = egui::ScrollArea::vertical()
-            .id_salt("preview_scroll")
-            .max_height(remaining_height)
-            .auto_shrink([false, false]);
-
-        // Only force scroll position when a new match is selected
-        if self.should_scroll_to_match {
-            scroll_area =
-                scroll_area.scroll_offset(egui::Vec2::new(0.0, self.preview_scroll_offset));
-            self.should_scroll_to_match = false; // Reset flag after applying
-        }
-
-        scroll_area.show(ui, |ui| {
-            self.render_preview(ui);
-        });
-    }
-
-    /// Render Tail mode UI
-    fn render_tail_mode(&mut self, ui: &mut egui::Ui) {
-        // File list header
-        ui.horizontal(|ui| {
-            ui.label("Files Being Monitored:");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .button(if self.tail_state.paused_all {
-                        "▶ Resume All"
-                    } else {
-                        "⏸ Pause All"
-                    })
-                    .clicked()
-                {
-                    self.tail_state.paused_all = !self.tail_state.paused_all;
-                }
-            });
-        });
-
-        ui.separator();
-
-        // File list (static, no auto-scroll)
-        egui::ScrollArea::vertical()
-            .id_salt("file_list_scroll")
-            .max_height(150.0)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                if self.tail_state.files.is_empty() {
-                    ui.label("No files being monitored.");
-                    ui.label("Start with: vis-grep -f /path/to/file.log");
-                } else {
-                    for (idx, file) in self.tail_state.files.iter_mut().enumerate() {
-                        ui.horizontal(|ui| {
-                            // Activity indicator (fixed width)
-                            let indicator = if file.is_active { "●" } else { "○" };
-                            let color = if file.is_active {
-                                egui::Color32::from_rgb(0, 255, 0)
-                            } else {
-                                egui::Color32::GRAY
-                            };
-                            ui.colored_label(color, indicator);
-
-                            // Filename (selectable for preview, fixed width)
-                            let selected = self.tail_state.preview_selected_file == Some(idx);
-                            ui.allocate_ui_with_layout(
-                                egui::Vec2::new(400.0, 20.0),
-                                egui::Layout::left_to_right(egui::Align::Center),
-                                |ui| {
-                                    if ui.selectable_label(selected, &file.display_name).clicked() {
-                                        self.tail_state.preview_selected_file = Some(idx);
-                                        self.tail_state.preview_needs_reload = true;
-                                        self.tail_state.preview_mode = PreviewMode::Following;
-                                    }
-                                },
-                            );
-
-                            // Size (fixed width)
-                            ui.allocate_ui_with_layout(
-                                egui::Vec2::new(70.0, 20.0),
-                                egui::Layout::left_to_right(egui::Align::Center),
-                                |ui| {
-                                    ui.label(format!("{:.1} KB", file.last_size as f64 / 1024.0));
-                                },
-                            );
-
-                            // Activity info (fixed width for consistent button position)
-                            let activity_text = if file.is_active && file.lines_since_last_read > 0
-                            {
-                                format!("(+{} lines)", file.lines_since_last_read)
-                            } else if !file.is_active {
-                                "(idle)".to_string()
-                            } else {
-                                "".to_string()
-                            };
-
-                            ui.allocate_ui_with_layout(
-                                egui::Vec2::new(100.0, 20.0),
-                                egui::Layout::left_to_right(egui::Align::Center),
-                                |ui| {
-                                    ui.add_sized(
-                                        egui::Vec2::new(100.0, 20.0),
-                                        egui::Label::new(
-                                            if file.is_active && file.lines_since_last_read > 0 {
-                                                egui::RichText::new(&activity_text)
-                                                    .color(egui::Color32::from_rgb(255, 200, 100))
-                                            } else {
-                                                egui::RichText::new(&activity_text)
-                                            },
-                                        ),
-                                    );
-                                },
-                            );
-
-                            // Individual pause button (now always in the same position)
-                            if ui
-                                .small_button(if file.paused { "▶" } else { "⏸" })
-                                .clicked()
-                            {
-                                file.paused = !file.paused;
-                            }
-                        });
-                    }
-                }
-            });
-
-        ui.separator();
-
-        // Split view: Output (left) and Preview (right)
-        let available_height = ui.available_height();
-
-        ui.horizontal(|ui| {
-            // Left: Combined output (50% width)
-            let half_width = ui.available_width() * 0.5;
-            ui.allocate_ui_with_layout(
-                egui::Vec2::new(half_width, available_height),
-                egui::Layout::top_down(egui::Align::LEFT),
-                |ui| {
-                    self.render_tail_output(ui);
-                },
-            );
-
-            ui.separator();
-
-            // Right: File preview (remaining width)
-            ui.allocate_ui_with_layout(
-                egui::Vec2::new(ui.available_width(), available_height),
-                egui::Layout::top_down(egui::Align::LEFT),
-                |ui| {
-                    self.render_tail_preview(ui);
-                },
-            );
-        });
-    }
-
-    /// Render the combined output panel for tail mode
-    fn render_tail_output(&mut self, ui: &mut egui::Ui) {
-        // Output header
-        ui.horizontal(|ui| {
-            ui.label("Output (Combined):");
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .button(if self.tail_state.paused_all {
-                        "▶"
-                    } else {
-                        "⏸"
-                    })
-                    .clicked()
-                {
-                    self.tail_state.paused_all = !self.tail_state.paused_all;
-                }
-                if ui.button("Clear").clicked() {
-                    self.tail_state.output_buffer.clear();
-                    self.tail_state.total_lines_received = 0;
-                    self.tail_state.lines_dropped = 0;
-                }
-            });
-        });
-
-        ui.separator();
-
-        // Output area
-        let available_height = ui.available_height() - 60.0;
-
-        let scroll_output = egui::ScrollArea::vertical()
-            .id_salt("tail_output_scroll")
-            .auto_shrink([false, false])
-            .max_height(available_height)
-            .stick_to_bottom(self.tail_state.auto_scroll);
-
-        scroll_output.show(ui, |ui| {
-            ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
-
-            for log_line in &self.tail_state.output_buffer {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-
-                    // Timestamp (relative)
-                    let elapsed = log_line.timestamp.elapsed();
-                    let secs = elapsed.as_secs();
-                    let time_str = if secs < 60 {
-                        format!("{}s", secs)
-                    } else if secs < 3600 {
-                        format!("{}m", secs / 60)
-                    } else {
-                        format!("{}h", secs / 3600)
-                    };
-                    ui.label(egui::RichText::new(time_str).color(egui::Color32::GRAY));
-
-                    // Source file with color
-                    let color = get_color_for_file(&log_line.source_file);
-                    ui.colored_label(color, format!("[{}]", log_line.source_file));
-
-                    // Content
-                    ui.label(&log_line.content);
-                });
-            }
-
-            if self.tail_state.output_buffer.is_empty() {
-                ui.label(
-                    egui::RichText::new("Waiting for log output...")
-                        .italics()
-                        .color(egui::Color32::GRAY),
-                );
-            }
-        });
-
-        // Status bar
-        ui.separator();
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut self.tail_state.auto_scroll, "Auto-scroll");
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let buffer_pct = if self.tail_state.max_buffer_lines > 0 {
-                    (self.tail_state.output_buffer.len() as f32
-                        / self.tail_state.max_buffer_lines as f32)
-                        * 100.0
-                } else {
-                    0.0
-                };
-
-                let active_count = self.tail_state.files.iter().filter(|f| f.is_active).count();
-
-                ui.label(format!(
-                    "Files: {}  Active: {}  Lines: {} / {}  Buffer: {:.1}%",
-                    self.tail_state.files.len(),
-                    active_count,
-                    self.tail_state.output_buffer.len(),
-                    self.tail_state.max_buffer_lines,
-                    buffer_pct
-                ));
-
-                if self.tail_state.lines_dropped > 0 {
-                    ui.colored_label(
-                        egui::Color32::YELLOW,
-                        format!("  ⚠ Dropped: {}", self.tail_state.lines_dropped),
-                    );
-                }
-            });
-        });
-    }
-
-    /// Render the preview panel for tail mode
-    fn render_tail_preview(&mut self, ui: &mut egui::Ui) {
-        if let Some(file_idx) = self.tail_state.preview_selected_file {
-            if file_idx < self.tail_state.files.len() {
-                let file = &self.tail_state.files[file_idx];
-
-                // Header
-                ui.horizontal(|ui| {
-                    ui.label(format!(
-                        "Preview: {} ({:.1} KB)",
-                        file.display_name,
-                        file.last_size as f64 / 1024.0
-                    ));
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // Pause/Follow toggle
-                        let (icon, color) = match self.tail_state.preview_mode {
-                            PreviewMode::Following => {
-                                ("📍 Following", egui::Color32::from_rgb(100, 255, 100))
-                            }
-                            PreviewMode::Paused => {
-                                ("⏸ Paused", egui::Color32::from_rgb(255, 200, 100))
-                            }
-                        };
-
-                        if ui.button(egui::RichText::new(icon).color(color)).clicked() {
-                            self.tail_state.preview_mode = match self.tail_state.preview_mode {
-                                PreviewMode::Following => PreviewMode::Paused,
-                                PreviewMode::Paused => PreviewMode::Following,
-                            };
-                        }
-                    });
-                });
-
-                ui.separator();
-
-                // Content area
-                let available_height = ui.available_height() - 40.0;
-
-                let scroll_area = if self.tail_state.preview_mode == PreviewMode::Following {
-                    egui::ScrollArea::vertical().stick_to_bottom(true)
-                } else {
-                    egui::ScrollArea::vertical()
-                        .scroll_offset(egui::Vec2::new(0.0, self.tail_state.preview_scroll_offset))
-                };
-
-                let scroll_output = scroll_area
-                    .id_salt("tail_preview_scroll")
-                    .max_height(available_height)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
-
-                        // Display preview content
-                        if self.tail_state.preview_content.is_empty() {
-                            ui.label(
-                                egui::RichText::new("Loading...")
-                                    .italics()
-                                    .color(egui::Color32::GRAY),
-                            );
-                        } else {
-                            for (line_num, line) in
-                                self.tail_state.preview_content.iter().enumerate()
-                            {
-                                ui.horizontal(|ui| {
-                                    // Line number
-                                    ui.label(
-                                        egui::RichText::new(format!("{:4} ", line_num + 1))
-                                            .color(egui::Color32::GRAY),
-                                    );
-                                    // Content
-                                    ui.label(line);
-                                });
-                            }
-                        }
-                    });
-
-                // Detect manual scroll (switch to Paused mode)
-                if self.tail_state.preview_mode == PreviewMode::Following {
-                    // In Following mode, we don't track manual scrolls
-                } else {
-                    // Update scroll offset
-                    self.tail_state.preview_scroll_offset = scroll_output.state.offset.y;
-                }
-
-                // Footer
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("j/k: scroll  gg/G: jump")
-                            .color(egui::Color32::GRAY)
-                            .small(),
-                    );
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if self.tail_state.preview_mode == PreviewMode::Following {
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "> Following - showing last {} lines",
-                                    self.tail_state.preview_follow_lines
-                                ))
-                                .color(egui::Color32::from_rgb(100, 255, 100)),
-                            );
-                        } else {
-                            let total_lines = self.tail_state.preview_content.len();
-                            ui.label(format!("Total lines: {}", total_lines));
-                        }
-                    });
-                });
-            } else {
-                // Invalid file index
-                ui.centered_and_justified(|ui| {
-                    ui.label(
-                        egui::RichText::new("Error: Invalid file selection")
-                            .italics()
-                            .color(egui::Color32::RED),
-                    );
-                });
-            }
-        } else {
-            // No file selected
-            ui.centered_and_justified(|ui| {
-                ui.label(
-                    egui::RichText::new("← Select a file to preview")
-                        .italics()
-                        .color(egui::Color32::GRAY),
-                );
-            });
-        }
-    }
 
     /// Render the highlight pattern field
     fn render_highlight_pattern_field(&mut self, ui: &mut egui::Ui) {
