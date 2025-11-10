@@ -611,35 +611,58 @@ impl eframe::App for VisGrepApp {
         }
 
         // 2. Second: SidePanels
+        // Get available width to calculate better ranges
+        let available_width = ctx.available_rect().width();
+        let min_panel_width = 200.0; // Minimum for any panel
+        let max_left_panel_width = available_width - min_panel_width; // Leave room for right panel
+        
         match self.mode {
             AppMode::Grep => {
                 egui::SidePanel::left("grep_left_panel")
                     .resizable(true)
-                    .default_width(600.0)
-                    .width_range(300.0..=1200.0)
+                    .default_width((available_width * 0.4).clamp(300.0, 800.0))
+                    .width_range(min_panel_width..=max_left_panel_width)
                     .show(ctx, |ui| {
-                        self.render_grep_left_panel(ui);
+                        // Add horizontal scrolling
+                        egui::ScrollArea::horizontal()
+                            .id_salt("grep_left_scroll_h")
+                            .show(ui, |ui| {
+                                self.render_grep_left_panel(ui);
+                            });
                     });
             },
             AppMode::Tail => {
-                let panel_response = egui::SidePanel::left("tail_left_panel")
+                egui::SidePanel::left("tail_left_panel")
                     .resizable(true)
-                    .default_width(700.0)
-                    .width_range(400.0..=1200.0)
+                    .default_width((available_width * 0.5).clamp(400.0, 900.0))
+                    .width_range(min_panel_width..=max_left_panel_width)
                     .show(ctx, |ui| {
-                        self.render_tail_output(ui);
+                        // Add horizontal scrolling
+                        egui::ScrollArea::horizontal()
+                            .id_salt("tail_left_scroll_h")
+                            .show(ui, |ui| {
+                                self.render_tail_output(ui);
+                            });
                     });
-                
-                // Log panel width for debugging
-                info!("Tail left panel width: {:.0}", panel_response.response.rect.width());
             },
         }
 
         // 3. Last: CentralPanel
         egui::CentralPanel::default().show(ctx, |ui| {
-            match self.mode {
-                AppMode::Grep => self.render_grep_right_panel(ui),
-                AppMode::Tail => self.render_tail_preview(ui),
+            // Debug: show available space
+            let available_rect = ui.available_rect_before_wrap();
+            if available_rect.width() < 50.0 || available_rect.height() < 50.0 {
+                ui.colored_label(
+                    egui::Color32::RED,
+                    format!("Warning: Panel too small: {:.0}x{:.0}", 
+                            available_rect.width(), 
+                            available_rect.height())
+                );
+            } else {
+                match self.mode {
+                    AppMode::Grep => self.render_grep_right_panel(ui),
+                    AppMode::Tail => self.render_tail_preview(ui),
+                }
             }
         });
 
@@ -1642,7 +1665,14 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "VisGrep",
         native_options,
-        Box::new(move |_cc| Ok(Box::new(VisGrepApp::new(startup_config)))),
+        Box::new(move |cc| {
+            // Set dark theme
+            let mut visuals = egui::Visuals::dark();
+            // Ensure good contrast for panels
+            visuals.window_shadow = egui::epaint::Shadow::NONE;
+            cc.egui_ctx.set_visuals(visuals);
+            Ok(Box::new(VisGrepApp::new(startup_config)))
+        }),
     )
 }
 

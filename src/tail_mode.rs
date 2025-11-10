@@ -119,13 +119,10 @@ impl VisGrepApp {
 
         ui.separator();
 
-        // Output area
-        let available_height = ui.available_height() - 60.0;
-
+        // Output area - use all available space
         let scroll_output = egui::ScrollArea::vertical()
             .id_salt("tail_output_scroll")
             .auto_shrink([false, false])
-            .max_height(available_height)
             .stick_to_bottom(self.tail_state.auto_scroll);
 
         scroll_output.show(ui, |ui| {
@@ -236,8 +233,7 @@ impl VisGrepApp {
                 ui.separator();
 
                 // Content area
-                let available_height = ui.available_height() - 40.0;
-
+                // Content area - use all available space
                 let scroll_area = if self.tail_state.preview_mode == PreviewMode::Following {
                     egui::ScrollArea::both()
                         .stick_to_bottom(true)
@@ -250,7 +246,6 @@ impl VisGrepApp {
 
                 let scroll_output = scroll_area
                     .id_salt("tail_preview_scroll")
-                    .max_height(available_height)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
