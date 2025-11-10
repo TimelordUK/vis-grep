@@ -637,12 +637,9 @@ impl eframe::App for VisGrepApp {
                     .default_width((available_width * 0.5).clamp(400.0, 900.0))
                     .width_range(min_panel_width..=max_left_panel_width)
                     .show(ctx, |ui| {
-                        // Add horizontal scrolling
-                        egui::ScrollArea::horizontal()
-                            .id_salt("tail_left_scroll_h")
-                            .show(ui, |ui| {
-                                self.render_tail_output(ui);
-                            });
+                        // Direct rendering without horizontal scroll wrapper
+                        // The render_tail_output already handles its own scrolling
+                        self.render_tail_output(ui);
                     });
             },
         }

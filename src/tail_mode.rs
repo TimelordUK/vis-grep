@@ -28,7 +28,12 @@ impl VisGrepApp {
             .max_height(150.0)
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                self.render_tail_file_list(ui);
+                // Add horizontal scrolling for long filenames
+                egui::ScrollArea::horizontal()
+                    .id_salt("file_list_h_scroll")
+                    .show(ui, |ui| {
+                        self.render_tail_file_list(ui);
+                    });
             });
         
         ui.separator();
@@ -126,40 +131,45 @@ impl VisGrepApp {
             .stick_to_bottom(self.tail_state.auto_scroll);
 
         scroll_output.show(ui, |ui| {
-            ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
+            // Add horizontal scrolling for long lines
+            egui::ScrollArea::horizontal()
+                .id_salt("tail_output_h_scroll")
+                .show(ui, |ui| {
+                    ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
 
-            for log_line in &self.tail_state.output_buffer {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
+                    for log_line in &self.tail_state.output_buffer {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
 
-                    // Timestamp (relative)
-                    let elapsed = log_line.timestamp.elapsed();
-                    let secs = elapsed.as_secs();
-                    let time_str = if secs < 60 {
-                        format!("{}s", secs)
-                    } else if secs < 3600 {
-                        format!("{}m", secs / 60)
-                    } else {
-                        format!("{}h", secs / 3600)
-                    };
-                    ui.label(egui::RichText::new(time_str).color(egui::Color32::GRAY));
+                            // Timestamp (relative)
+                            let elapsed = log_line.timestamp.elapsed();
+                            let secs = elapsed.as_secs();
+                            let time_str = if secs < 60 {
+                                format!("{}s", secs)
+                            } else if secs < 3600 {
+                                format!("{}m", secs / 60)
+                            } else {
+                                format!("{}h", secs / 3600)
+                            };
+                            ui.label(egui::RichText::new(time_str).color(egui::Color32::GRAY));
 
-                    // Source file with color
-                    let color = get_color_for_file(&log_line.source_file);
-                    ui.colored_label(color, format!("[{}]", log_line.source_file));
+                            // Source file with color
+                            let color = get_color_for_file(&log_line.source_file);
+                            ui.colored_label(color, format!("[{}]", log_line.source_file));
 
-                    // Content
-                    ui.label(&log_line.content);
+                            // Content
+                            ui.label(&log_line.content);
+                        });
+                    }
+
+                    if self.tail_state.output_buffer.is_empty() {
+                        ui.label(
+                            egui::RichText::new("Waiting for log output...")
+                                .italics()
+                                .color(egui::Color32::GRAY),
+                        );
+                    }
                 });
-            }
-
-            if self.tail_state.output_buffer.is_empty() {
-                ui.label(
-                    egui::RichText::new("Waiting for log output...")
-                        .italics()
-                        .color(egui::Color32::GRAY),
-                );
-            }
         });
 
         // Status bar
