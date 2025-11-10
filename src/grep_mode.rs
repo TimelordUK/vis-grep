@@ -17,6 +17,36 @@ impl VisGrepApp {
         self.render_file_age_filter(ui);
         ui.separator();
 
+        // Font size control
+        ui.horizontal(|ui| {
+            ui.label("Font Size:");
+            
+            // Quick size buttons
+            let sizes = [
+                ("XS", 10.0),
+                ("S", 12.0),
+                ("M", 14.0),
+                ("L", 16.0),
+                ("XL", 18.0),
+            ];
+            
+            for (label, size) in &sizes {
+                if ui.selectable_label(self.grep_state.font_size == *size, *label).clicked() {
+                    self.grep_state.font_size = *size;
+                }
+            }
+            
+            ui.separator();
+            
+            // Slider for fine control
+            ui.add(
+                egui::Slider::new(&mut self.grep_state.font_size, 8.0..=24.0)
+                    .suffix(" px")
+                    .show_value(true)
+            );
+        });
+        ui.separator();
+
         // Results filter and expand/collapse controls
         ui.horizontal(|ui| {
             ui.label("Filter Results:");

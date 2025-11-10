@@ -99,6 +99,9 @@ struct GrepState {
 
     // FIX message highlighting pattern
     fix_highlight_pattern: String,
+    
+    // Font settings
+    font_size: f32,
 }
 
 impl GrepState {
@@ -128,6 +131,7 @@ impl GrepState {
             pending_search: false,
 
             fix_highlight_pattern: String::new(),
+            font_size: 14.0,
         }
     }
 }
@@ -286,6 +290,9 @@ struct TailState {
     preview_follow_lines: usize,
     preview_content: Vec<String>,
     preview_needs_reload: bool,
+    
+    // Font settings
+    font_size: f32,
 }
 
 impl TailState {
@@ -309,6 +316,7 @@ impl TailState {
             preview_follow_lines: 100,
             preview_content: Vec::new(),
             preview_needs_reload: false,
+            font_size: 14.0,
         }
     }
 
@@ -1232,6 +1240,10 @@ impl VisGrepApp {
 
         if let Some(matched_line) = &self.preview.matched_line_text {
             ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
+            
+            // Apply custom font size
+            let font_id = egui::FontId::new(self.grep_state.font_size, egui::FontFamily::Monospace);
+            ui.style_mut().text_styles.insert(egui::TextStyle::Monospace, font_id);
 
             let highlight_color = Color32::from_rgb(255, 200, 100); // Orange/yellow
             let highlight_bg = Color32::from_rgb(80, 60, 40); // Brown background
@@ -1288,6 +1300,10 @@ impl VisGrepApp {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
+                
+                // Apply custom font size
+                let font_id = egui::FontId::new(self.grep_state.font_size, egui::FontFamily::Monospace);
+                ui.style_mut().text_styles.insert(egui::TextStyle::Monospace, font_id);
 
                 let match_line_bg = Color32::from_rgb(60, 60, 80); // Subtle blue-gray for matched line
 

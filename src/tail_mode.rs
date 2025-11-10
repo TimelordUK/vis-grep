@@ -55,6 +55,37 @@ impl VisGrepApp {
 
         ui.separator();
 
+        // Font size control
+        ui.horizontal(|ui| {
+            ui.label("Font Size:");
+            
+            // Quick size buttons
+            let sizes = [
+                ("XS", 10.0),
+                ("S", 12.0),
+                ("M", 14.0),
+                ("L", 16.0),
+                ("XL", 18.0),
+            ];
+            
+            for (label, size) in &sizes {
+                if ui.selectable_label(self.tail_state.font_size == *size, *label).clicked() {
+                    self.tail_state.font_size = *size;
+                }
+            }
+            
+            ui.separator();
+            
+            // Slider for fine control
+            ui.add(
+                egui::Slider::new(&mut self.tail_state.font_size, 8.0..=24.0)
+                    .suffix(" px")
+                    .show_value(true)
+            );
+        });
+
+        ui.separator();
+
         // File list
         egui::ScrollArea::vertical()
             .id_salt("file_list_scroll")
@@ -169,6 +200,10 @@ impl VisGrepApp {
                 .id_salt("tail_output_h_scroll")
                 .show(ui, |ui| {
                     ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
+                    
+                    // Apply custom font size
+                    let font_id = egui::FontId::new(self.tail_state.font_size, egui::FontFamily::Monospace);
+                    ui.style_mut().text_styles.insert(egui::TextStyle::Monospace, font_id);
 
                     for log_line in &self.tail_state.output_buffer {
                         ui.horizontal(|ui| {
@@ -293,6 +328,10 @@ impl VisGrepApp {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
+                        
+                        // Apply custom font size
+                        let font_id = egui::FontId::new(self.tail_state.font_size, egui::FontFamily::Monospace);
+                        ui.style_mut().text_styles.insert(egui::TextStyle::Monospace, font_id);
 
                         // Display preview content
                         if self.tail_state.preview_content.is_empty() {
