@@ -1,0 +1,54 @@
+# Example tail layout file for vis-grep
+# This demonstrates organizing multiple log files into logical groups
+name: "Example Production Layout"
+version: 1
+settings:
+  poll_interval_ms: 250
+  auto_expand_active: true
+
+groups:
+  - name: "Web Servers"
+    icon: "🌐"
+    files:
+      - path: "/var/log/nginx/access.log"
+        name: "Nginx Access"
+      - path: "/var/log/nginx/error.log"
+        name: "Nginx Errors"
+  
+  - name: "Microservices"
+    icon: "📦"
+    groups:
+      - name: "Core APIs"
+        files:
+          - path: "/app/logs/auth-service.log"
+          - path: "/app/logs/user-service.log"
+          - path: "/app/logs/order-service.log"
+      
+      - name: "Background Workers"
+        collapsed: true
+        files:
+          - path: "/app/logs/email-worker.log"
+          - path: "/app/logs/report-worker.log"
+  
+  - name: "Trading Systems"
+    icon: "📈"
+    groups:
+      - name: "FIX Sessions"
+        files:
+          - path: "/logs/fix_client_A.log"
+          - path: "/logs/fix_client_B.log"
+          - path: "/logs/fix_gateway.log"
+      
+      - name: "Market Data"
+        files:
+          - path: "/logs/market_feed.log"
+          - path: "/logs/price_engine.log"
+  
+  - name: "System Logs"
+    icon: "🖥️"
+    collapsed: true
+    files:
+      - path: "/var/log/syslog"
+        name: "System Log"
+      - path: "/var/log/auth.log"
+        name: "Auth Log"
