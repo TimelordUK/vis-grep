@@ -3,17 +3,6 @@ use eframe::egui;
 
 impl VisGrepApp {
     pub fn render_tail_mode_controls(&mut self, ui: &mut egui::Ui) {
-        // Debug info at top
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(format!("DEBUG: Panel height={:.1}, Available={:.1}", 
-                    self.tail_state.control_panel_height, 
-                    ui.available_height()))
-                    .small()
-                    .color(egui::Color32::YELLOW)
-            );
-        });
-        ui.separator();
         
         // File list header
         ui.horizontal(|ui| {
