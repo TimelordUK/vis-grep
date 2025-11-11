@@ -81,7 +81,8 @@ def generate_group(group_num, indent, files_per_group, start_file):
         nested_files = files_per_group // 2
         for j in range(nested_files):
             file_num = start_file + j
-            file_path = (Path.cwd() / LOG_DIR / f"test_{file_num}.log").absolute()
+            # Use as_posix() to get forward slashes for YAML compatibility on Windows
+            file_path = (Path.cwd() / LOG_DIR / f"test_{file_num}.log").absolute().as_posix()
             output += f"""{indent}        - path: "{file_path}"
 {indent}          name: "Test Log {file_num}"
 """
@@ -94,7 +95,8 @@ def generate_group(group_num, indent, files_per_group, start_file):
         # Add remaining files to second nested group
         for j in range(nested_files, files_per_group):
             file_num = start_file + j
-            file_path = (Path.cwd() / LOG_DIR / f"test_{file_num}.log").absolute()
+            # Use as_posix() to get forward slashes for YAML compatibility on Windows
+            file_path = (Path.cwd() / LOG_DIR / f"test_{file_num}.log").absolute().as_posix()
             output += f"""{indent}        - path: "{file_path}"
 {indent}          name: "Test Log {file_num}"
 """
@@ -105,7 +107,8 @@ def generate_group(group_num, indent, files_per_group, start_file):
 """
         for j in range(files_per_group):
             file_num = start_file + j
-            file_path = (Path.cwd() / LOG_DIR / f"test_{file_num}.log").absolute()
+            # Use as_posix() to get forward slashes for YAML compatibility on Windows
+            file_path = (Path.cwd() / LOG_DIR / f"test_{file_num}.log").absolute().as_posix()
             output += f"""{indent}    - path: "{file_path}"
 {indent}      name: "Test Log {file_num}"
 """

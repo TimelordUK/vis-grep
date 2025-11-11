@@ -74,6 +74,8 @@ $Indent      files:
         for ($j = 0; $j -lt $NestedFiles; $j++) {
             $FileNum = $StartFile + $j
             $FilePath = (Resolve-Path $LogDir).Path + "\test_$FileNum.log"
+            # Convert backslashes to forward slashes for YAML compatibility
+            $FilePath = $FilePath -replace '\\', '/'
             $Output += @"
 $Indent        - path: "$FilePath"
 $Indent          name: "Test Log $FileNum"
@@ -92,6 +94,8 @@ $Indent      files:
         for ($j = $NestedFiles; $j -lt $FilesPerGroup; $j++) {
             $FileNum = $StartFile + $j
             $FilePath = (Resolve-Path $LogDir).Path + "\test_$FileNum.log"
+            # Convert backslashes to forward slashes for YAML compatibility
+            $FilePath = $FilePath -replace '\\', '/'
             $Output += @"
 $Indent        - path: "$FilePath"
 $Indent          name: "Test Log $FileNum"
@@ -109,6 +113,8 @@ $Indent  files:
         for ($j = 0; $j -lt $FilesPerGroup; $j++) {
             $FileNum = $StartFile + $j
             $FilePath = (Resolve-Path $LogDir).Path + "\test_$FileNum.log"
+            # Convert backslashes to forward slashes for YAML compatibility
+            $FilePath = $FilePath -replace '\\', '/'
             $Output += @"
 $Indent    - path: "$FilePath"
 $Indent      name: "Test Log $FileNum"
