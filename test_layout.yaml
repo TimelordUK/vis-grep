@@ -1,0 +1,30 @@
+name: "Test Log Layout"
+version: 1
+settings:
+  poll_interval_ms: 250
+  auto_expand_active: true
+
+groups:
+  - name: "Application Logs"
+    icon: "📱"
+    collapsed: false
+    groups:
+      - name: "Core Services"
+        files:
+          - path: "/home/me/dev/src/vis-grep/test_logs/test_1.log"
+            name: "Test Log 1"
+          - path: "/home/me/dev/src/vis-grep/test_logs/test_2.log"
+            name: "Test Log 2"
+      
+      - name: "Background Jobs"
+        collapsed: true
+        files:
+          - path: "/home/me/dev/src/vis-grep/test_logs/test_3.log"
+            name: "Test Log 3"
+  
+  - name: "System Logs"
+    icon: "🖥️"
+    collapsed: true
+    files:
+      - path: "/home/me/dev/src/vis-grep/test_logs/test_4.log"
+        name: "Test Log 4"

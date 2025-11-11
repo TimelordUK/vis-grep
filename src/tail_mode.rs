@@ -3,6 +3,18 @@ use eframe::egui;
 
 impl VisGrepApp {
     pub fn render_tail_mode_controls(&mut self, ui: &mut egui::Ui) {
+        // Debug info at top
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(format!("DEBUG: Panel height={:.1}, Available={:.1}", 
+                    self.tail_state.control_panel_height, 
+                    ui.available_height()))
+                    .small()
+                    .color(egui::Color32::YELLOW)
+            );
+        });
+        ui.separator();
+        
         // File list header
         ui.horizontal(|ui| {
             ui.label("Files Being Monitored:");
@@ -110,56 +122,188 @@ impl VisGrepApp {
         if self.tail_state.files.is_empty() {
             ui.label("No files being monitored.");
             ui.label("Start with: vis-grep -f /path/to/file.log");
-        } else {
-            // Use vertical layout for files
+            ui.label("Or load a layout: vis-grep --tail-layout layout.yaml");
+        } else if self.tail_state.layout.is_some() {
+            // Tree layout mode
             ui.vertical(|ui| {
-                for (idx, file) in self.tail_state.files.iter_mut().enumerate() {
-                    ui.horizontal(|ui| {
-                        // Activity indicator
-                        let indicator = if file.is_active { "●" } else { "○" };
-                        let color = if file.is_active {
-                            egui::Color32::from_rgb(0, 255, 0)
-                        } else {
-                            egui::Color32::GRAY
-                        };
-                        ui.colored_label(color, indicator);
-
-                        // Filename (selectable) with fixed width
-                        let selected = self.tail_state.preview_selected_file == Some(idx);
-                        ui.allocate_ui_with_layout(
-                            egui::Vec2::new(300.0, 20.0),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                if ui.selectable_label(selected, &file.display_name).clicked() {
-                                    self.tail_state.preview_selected_file = Some(idx);
-                                    self.tail_state.preview_needs_reload = true;
-                                    self.tail_state.preview_mode = PreviewMode::Following;
-                                }
-                            },
-                        );
-
-                        // File size
-                        ui.label(format!("{:.1} KB", file.last_size as f64 / 1024.0));
-
-                        // Activity info
-                        if file.is_active && file.lines_since_last_read > 0 {
-                            ui.label(
-                                egui::RichText::new(format!("(+{} lines)", file.lines_since_last_read))
-                                    .color(egui::Color32::from_rgb(255, 200, 100))
-                            );
-                        } else if !file.is_active {
-                            ui.label("(idle)");
-                        } else {
-                            ui.add_space(50.0);
+                // Clone the group IDs to avoid borrow checker issues
+                let group_ids: Vec<String> = if let Some(layout) = &self.tail_state.layout {
+                    layout.root_groups.iter().map(|g| g.id.clone()).collect()
+                } else {
+                    Vec::new()
+                };
+                
+                for group_id in group_ids {
+                    self.render_file_group_by_id(ui, &group_id, 0);
+                }
+                
+                // Ungrouped files at the end
+                let mut has_ungrouped = false;
+                for idx in 0..self.tail_state.files.len() {
+                    if self.tail_state.files[idx].group_id.is_none() {
+                        if !has_ungrouped {
+                            has_ungrouped = true;
+                            ui.separator();
+                            ui.label(egui::RichText::new("Ungrouped Files").strong());
                         }
-
-                        // Pause button
-                        if ui.small_button(if file.paused { "▶" } else { "⏸" }).clicked() {
-                            file.paused = !file.paused;
-                        }
-                    });
+                        self.render_file_entry(ui, idx, 0);
+                    }
                 }
             });
+        } else {
+            // Flat list mode (original)
+            ui.vertical(|ui| {
+                for idx in 0..self.tail_state.files.len() {
+                    self.render_file_entry(ui, idx, 0);
+                }
+            });
+        }
+    }
+    
+    fn render_file_group_by_id(&mut self, ui: &mut egui::Ui, group_id: &str, depth: usize) {
+        // Get group info (cloned to avoid borrow issues)
+        let group_info = if let Some(layout) = &self.tail_state.layout {
+            if let Some(group) = layout.find_group(group_id) {
+                Some((
+                    group.name.clone(),
+                    group.icon.clone(),
+                    group.collapsed,
+                    group.has_activity,
+                    group.active_file_count,
+                    group.total_file_count,
+                    group.groups.iter().map(|g| g.id.clone()).collect::<Vec<_>>(),
+                    group.files.clone(),
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
+        if let Some((name, icon, collapsed, has_activity, active_count, total_count, child_group_ids, files)) = group_info {
+            let indent = depth as f32 * 20.0;
+            
+            ui.horizontal(|ui| {
+                ui.add_space(indent);
+                
+                // Expand/collapse arrow
+                let arrow = if collapsed { "▶" } else { "▼" };
+                if ui.small_button(arrow).clicked() {
+                    // Toggle collapsed state
+                    if let Some(layout) = &mut self.tail_state.layout {
+                        if let Some(group) = layout.find_group_mut(group_id) {
+                            group.collapsed = !group.collapsed;
+                        }
+                    }
+                }
+                
+                // Group icon
+                if let Some(icon) = &icon {
+                    ui.label(icon);
+                }
+                
+                // Group name with activity count
+                let label = format!("{} ({} active / {} total)", 
+                    name, 
+                    active_count, 
+                    total_count
+                );
+                
+                let color = if has_activity {
+                    egui::Color32::from_rgb(200, 255, 200)  // Light green
+                } else {
+                    ui.style().visuals.text_color()
+                };
+                
+                ui.colored_label(color, label);
+                
+                // Group controls
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("⏸").on_hover_text("Pause group").clicked() {
+                        self.pause_group(group_id);
+                    }
+                });
+            });
+            
+            // Render children if expanded
+            if !collapsed {
+                // Render subgroups
+                for child_id in child_group_ids {
+                    self.render_file_group_by_id(ui, &child_id, depth + 1);
+                }
+                
+                // Render files
+                for file_entry in &files {
+                    // Find the actual file index by matching path
+                    if let Some(file_idx) = self.tail_state.files.iter().position(|f| f.path == file_entry.path) {
+                        self.render_file_entry(ui, file_idx, depth + 1);
+                    }
+                }
+            }
+        }
+    }
+    
+    fn render_file_entry(&mut self, ui: &mut egui::Ui, file_idx: usize, depth: usize) {
+        let file = &mut self.tail_state.files[file_idx];
+        let indent = depth as f32 * 20.0;
+        
+        ui.horizontal(|ui| {
+            ui.add_space(indent);
+            
+            // Activity indicator
+            let indicator = if file.is_active { "●" } else { "○" };
+            let color = if file.is_active {
+                egui::Color32::from_rgb(0, 255, 0)
+            } else {
+                egui::Color32::GRAY
+            };
+            ui.colored_label(color, indicator);
+
+            // Filename (selectable) with fixed width
+            let selected = self.tail_state.preview_selected_file == Some(file_idx);
+            ui.allocate_ui_with_layout(
+                egui::Vec2::new(300.0, 20.0),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    if ui.selectable_label(selected, &file.display_name).clicked() {
+                        self.tail_state.preview_selected_file = Some(file_idx);
+                        self.tail_state.preview_needs_reload = true;
+                        self.tail_state.preview_mode = PreviewMode::Following;
+                    }
+                },
+            );
+
+            // File size
+            ui.label(format!("{:.1} KB", file.last_size as f64 / 1024.0));
+
+            // Activity info
+            if file.is_active && file.lines_since_last_read > 0 {
+                ui.label(
+                    egui::RichText::new(format!("(+{} lines)", file.lines_since_last_read))
+                        .color(egui::Color32::from_rgb(255, 200, 100))
+                );
+            } else if !file.is_active {
+                ui.label("(idle)");
+            } else {
+                ui.add_space(50.0);
+            }
+
+            // Pause button
+            if ui.small_button(if file.paused { "▶" } else { "⏸" }).clicked() {
+                file.paused = !file.paused;
+            }
+        });
+    }
+    
+    fn pause_group(&mut self, group_id: &str) {
+        // Pause all files in the group
+        for file in &mut self.tail_state.files {
+            if let Some(file_group_id) = &file.group_id {
+                if file_group_id == group_id {
+                    file.paused = true;
+                }
+            }
         }
     }
     

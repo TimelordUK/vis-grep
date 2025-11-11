@@ -13,12 +13,14 @@ mod search;
 mod grep_mode;
 mod tail_mode;
 mod splitter;
+mod tail_layout;
 
 use config::Config;
 use input_handler::{InputHandler, NavigationCommand};
 use preview::FilePreview;
 use search::{SearchEngine, SearchResult};
 use splitter::{Splitter, SplitterAxis};
+use tail_layout::TailLayout;
 
 // ============================================================================
 // Command-Line Arguments
@@ -35,6 +37,10 @@ struct Cli {
     /// Start in tail mode (same as 'tail' subcommand)
     #[arg(short = 'f', long = "follow")]
     follow: bool,
+
+    /// Load a tail layout file
+    #[arg(long = "tail-layout", short = 'l', value_name = "FILE")]
+    tail_layout: Option<PathBuf>,
 
     /// Files to tail/follow (when using -f flag)
     #[arg(value_name = "FILES")]
@@ -55,6 +61,7 @@ enum Commands {
 struct StartupConfig {
     mode: AppMode,
     tail_files: Vec<PathBuf>,
+    tail_layout: Option<PathBuf>,
 }
 
 impl Default for StartupConfig {
@@ -62,6 +69,7 @@ impl Default for StartupConfig {
         Self {
             mode: AppMode::Grep,
             tail_files: Vec::new(),
+            tail_layout: None,
         }
     }
 }
@@ -183,6 +191,9 @@ struct TailedFile {
     // Statistics
     total_lines_read: usize,
     total_bytes_read: u64,
+    
+    // Group membership
+    group_id: Option<String>,
 }
 
 impl TailedFile {
@@ -211,6 +222,7 @@ impl TailedFile {
             throttle_state: ThrottleState::Normal,
             total_lines_read: 0,
             total_bytes_read: 0,
+            group_id: None,
         })
     }
 
@@ -296,6 +308,12 @@ struct TailState {
     
     // Font settings
     font_size: f32,
+    
+    // Tree layout
+    layout: Option<TailLayout>,
+    
+    // UI state
+    control_panel_height: f32,
 }
 
 impl TailState {
@@ -320,13 +338,20 @@ impl TailState {
             preview_content: Vec::new(),
             preview_needs_reload: false,
             font_size: 14.0,
+            layout: None,
+            control_panel_height: 250.0,
         }
     }
 
     fn add_file(&mut self, path: PathBuf) -> Result<(), String> {
+        self.add_file_with_group(path, None)
+    }
+    
+    fn add_file_with_group(&mut self, path: PathBuf, group_id: Option<String>) -> Result<(), String> {
         match TailedFile::new(path) {
-            Ok(file) => {
+            Ok(mut file) => {
                 info!("Started tailing: {}", file.display_name);
+                file.group_id = group_id;
                 self.files.push(file);
                 Ok(())
             }
@@ -336,6 +361,31 @@ impl TailState {
                 Err(msg)
             }
         }
+    }
+    
+    fn load_layout(&mut self, layout_path: &PathBuf) -> Result<(), String> {
+        // Load the layout file
+        let layout = TailLayout::from_yaml_file(layout_path)?;
+        
+        // Apply layout settings
+        if let Some(poll_ms) = layout.settings.poll_interval_ms {
+            self.poll_interval_ms = poll_ms;
+        }
+        
+        // Add all files from the layout
+        let file_paths = layout.get_all_file_paths();
+        for (path, custom_name, group_id) in file_paths {
+            if let Ok(mut file) = TailedFile::new(path) {
+                if let Some(name) = custom_name {
+                    file.display_name = name;
+                }
+                file.group_id = Some(group_id);
+                self.files.push(file);
+            }
+        }
+        
+        self.layout = Some(layout);
+        Ok(())
     }
 }
 
@@ -373,7 +423,14 @@ impl VisGrepApp {
     fn new(startup_config: StartupConfig) -> Self {
         let mut tail_state = TailState::new();
 
-        // Add files from startup config
+        // Load layout file if provided
+        if let Some(layout_path) = &startup_config.tail_layout {
+            if let Err(e) = tail_state.load_layout(layout_path) {
+                eprintln!("Failed to load layout file: {}", e);
+            }
+        }
+        
+        // Add individual files from startup config
         for file_path in startup_config.tail_files {
             if let Err(e) = tail_state.add_file(file_path) {
                 eprintln!("{}", e);
@@ -467,6 +524,9 @@ impl VisGrepApp {
         }
 
         self.tail_state.last_poll_time = now;
+        
+        // Collect activity changes to apply after the loop
+        let mut activity_changes: Vec<(String, bool)> = Vec::new();
 
         // Poll each file
         for (file_idx, file) in self.tail_state.files.iter_mut().enumerate() {
@@ -476,10 +536,18 @@ impl VisGrepApp {
 
             match file.check_for_updates() {
                 Ok(new_lines) => {
+                    let was_active = file.is_active;
                     if !new_lines.is_empty() {
                         file.is_active = true;
                         file.last_activity = now;
                         file.lines_since_last_read = new_lines.len();
+                        
+                        // Store activity change to propagate later
+                        if !was_active {
+                            if let Some(group_id) = &file.group_id {
+                                activity_changes.push((group_id.clone(), true));
+                            }
+                        }
 
                         // Add lines to output buffer
                         for line in new_lines {
@@ -515,8 +583,15 @@ impl VisGrepApp {
                         if now.duration_since(file.last_activity)
                             > std::time::Duration::from_secs(2)
                         {
-                            file.is_active = false;
-                            file.lines_since_last_read = 0;
+                            if file.is_active {
+                                file.is_active = false;
+                                file.lines_since_last_read = 0;
+                                
+                                // Store activity change to propagate later
+                                if let Some(group_id) = &file.group_id {
+                                    activity_changes.push((group_id.clone(), false));
+                                }
+                            }
                         }
                     }
                 }
@@ -525,10 +600,21 @@ impl VisGrepApp {
                 }
             }
         }
+        
+        // Apply activity changes after the loop
+        for (group_id, active) in activity_changes {
+            self.propagate_activity_to_group(&group_id, active);
+        }
 
         // Reload preview if needed
         if self.tail_state.preview_needs_reload {
             self.reload_tail_preview();
+        }
+    }
+    
+    fn propagate_activity_to_group(&mut self, group_id: &str, active: bool) {
+        if let Some(layout) = &mut self.tail_state.layout {
+            layout.update_group_activity(group_id, active);
         }
     }
 
@@ -600,6 +686,20 @@ impl eframe::App for VisGrepApp {
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             self.render_status_bar(ui);
         });
+
+        // Mode-specific top panels
+        match self.mode {
+            AppMode::Grep => {
+                egui::TopBottomPanel::top("grep_controls")
+                    .resizable(true)
+                    .default_height(200.0)
+                    .height_range(150.0..=400.0)
+                    .show(ctx, |ui| {
+                        self.render_grep_mode_ui(ui);
+                    });
+            },
+            _ => {},
+        }
 
         // 2. Second: SidePanels
         // Get available width to calculate better ranges
@@ -698,7 +798,11 @@ impl eframe::App for VisGrepApp {
             },
         }
 
-        ctx.request_repaint();
+        // Only request repaint when in tail mode and not paused
+        // This prevents unnecessary updates that might cause splitter issues
+        if self.mode == AppMode::Tail && !self.tail_state.paused_all {
+            ctx.request_repaint();
+        }
     }
 }
 
@@ -1698,18 +1802,24 @@ fn main() -> eframe::Result<()> {
             StartupConfig {
                 mode: AppMode::Tail,
                 tail_files: files,
+                tail_layout: cli.tail_layout,
             }
         }
         None => {
-            if cli.follow || !cli.files.is_empty() {
-                // -f flag or files provided without subcommand
-                info!(
-                    "Starting in Tail mode (via -f flag) with files: {:?}",
-                    cli.files
-                );
+            if cli.follow || !cli.files.is_empty() || cli.tail_layout.is_some() {
+                // -f flag, files provided, or layout specified
+                if let Some(ref layout) = cli.tail_layout {
+                    info!("Starting in Tail mode with layout file: {:?}", layout);
+                } else {
+                    info!(
+                        "Starting in Tail mode (via -f flag) with files: {:?}",
+                        cli.files
+                    );
+                }
                 StartupConfig {
                     mode: AppMode::Tail,
                     tail_files: cli.files,
+                    tail_layout: cli.tail_layout,
                 }
             } else {
                 // Default: Grep mode
