@@ -86,10 +86,11 @@ impl VisGrepApp {
 
         ui.separator();
 
-        // File list
+        // File list - use remaining available height
+        let available_height = ui.available_height() - 10.0; // Leave some margin
         egui::ScrollArea::vertical()
             .id_salt("file_list_scroll")
-            .max_height(150.0)
+            .max_height(available_height)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 // Add horizontal scrolling for long filenames

@@ -604,14 +604,18 @@ impl eframe::App for VisGrepApp {
         match self.mode {
             AppMode::Grep => {
                 egui::TopBottomPanel::top("grep_controls")
-                    .resizable(false)
+                    .resizable(true)
+                    .default_height(200.0)
+                    .height_range(150.0..=400.0)
                     .show(ctx, |ui| {
                         self.render_grep_mode_ui(ui);
                     });
             },
             AppMode::Tail => {
                 egui::TopBottomPanel::top("tail_controls")
-                    .resizable(false)
+                    .resizable(true)
+                    .default_height(250.0)
+                    .height_range(150.0..=500.0)
                     .show(ctx, |ui| {
                         self.render_tail_mode_controls(ui);
                     });
