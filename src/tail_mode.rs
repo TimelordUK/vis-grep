@@ -442,6 +442,36 @@ impl VisGrepApp {
                                 PreviewMode::Paused => PreviewMode::Following,
                             };
                         }
+                        
+                        ui.separator();
+                        
+                        // Buffer size control
+                        ui.label("Lines:");
+                        let response = ui.add(
+                            egui::DragValue::new(&mut self.tail_state.preview_follow_lines)
+                                .speed(50.0)
+                                .range(100..=10000)
+                                .prefix("📜 ")
+                        );
+                        
+                        if response.changed() {
+                            self.tail_state.preview_needs_reload = true;
+                        }
+                        
+                        response.on_hover_text("Number of lines to keep in buffer (100-10000)");
+                        
+                        if ui.small_button("500").on_hover_text("500 lines").clicked() {
+                            self.tail_state.preview_follow_lines = 500;
+                            self.tail_state.preview_needs_reload = true;
+                        }
+                        if ui.small_button("1K").on_hover_text("1000 lines").clicked() {
+                            self.tail_state.preview_follow_lines = 1000;
+                            self.tail_state.preview_needs_reload = true;
+                        }
+                        if ui.small_button("5K").on_hover_text("5000 lines").clicked() {
+                            self.tail_state.preview_follow_lines = 5000;
+                            self.tail_state.preview_needs_reload = true;
+                        }
                     });
                 });
 

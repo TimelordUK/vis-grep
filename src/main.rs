@@ -334,7 +334,7 @@ impl TailState {
             preview_selected_file: None,
             preview_mode: PreviewMode::Following,
             preview_scroll_offset: 0.0,
-            preview_follow_lines: 100,
+            preview_follow_lines: 1000,
             preview_content: Vec::new(),
             preview_needs_reload: false,
             font_size: 14.0,
