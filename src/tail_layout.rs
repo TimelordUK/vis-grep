@@ -58,6 +58,8 @@ pub struct FileGroup {
     pub active_file_count: usize,
     #[serde(skip)]
     pub total_file_count: usize,
+    #[serde(skip)]
+    pub user_collapsed: Option<bool>, // Track if user manually collapsed/expanded
 }
 
 /// An individual file entry within a group
@@ -194,9 +196,15 @@ impl TailLayout {
                 let was_active = group.has_activity;
                 group.has_activity = group.active_file_count > 0;
                 
-                // Auto-expand if configured
-                if group.has_activity && auto_expand {
+                // Auto-expand if configured AND user hasn't manually collapsed
+                if group.has_activity && auto_expand && group.user_collapsed.is_none() {
                     group.collapsed = false;
+                }
+                
+                // If activity stops and user hasn't manually set state, allow collapse
+                if !group.has_activity && group.user_collapsed.is_none() {
+                    // Could auto-collapse here if desired, but for now just leave as is
+                    // group.collapsed = true;
                 }
                 
                 // Return parent info and whether activity changed

@@ -194,6 +194,8 @@ impl VisGrepApp {
                     if let Some(layout) = &mut self.tail_state.layout {
                         if let Some(group) = layout.find_group_mut(group_id) {
                             group.collapsed = !group.collapsed;
+                            // Mark as user-controlled to prevent auto-expand
+                            group.user_collapsed = Some(group.collapsed);
                         }
                     }
                 }
