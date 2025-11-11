@@ -159,10 +159,13 @@ $YamlContent | Set-Content -Path $LayoutFile -Encoding UTF8
 Write-Color "`n✓ Created layout file: $LayoutFile" -Color Green
 Write-Color "✓ Created $NumFiles log files in $LogDir/" -Color Green
 
-# Function to append random log entries to files
-$Script:ShouldStop = $false
+# Start log appender in background job
+Write-Color "`nStarting log appender in background..." -Color Yellow
 
-function Start-LogAppender {
+# Create a script block that's completely self-contained for the background job
+$AppenderScript = {
+    param($NumFiles, $LogDir)
+    
     $Messages = @(
         "Processing request from client"
         "Database connection established"
@@ -178,39 +181,53 @@ function Start-LogAppender {
     
     $Levels = @("INFO", "WARN", "ERROR", "DEBUG")
     
-    while (-not $Script:ShouldStop) {
+    # Run until the job is stopped
+    while ($true) {
         # Randomly select a few files to update
         $FilesToUpdate = Get-Random -Minimum 1 -Maximum 4
         
         for ($i = 0; $i -lt $FilesToUpdate; $i++) {
             $FileNum = Get-Random -Minimum 1 -Maximum ($NumFiles + 1)
             $File = Join-Path $LogDir "test_$FileNum.log"
-            $Level = $Levels | Get-Random
-            $Msg = $Messages | Get-Random
-            $Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
-            $Value = Get-Random -Maximum 1000
             
-            Add-Content -Path $File -Value "[$Timestamp] [$Level] $Msg $Value" -Encoding UTF8
+            # Only append if file exists
+            if (Test-Path $File) {
+                $Level = $Levels | Get-Random
+                $Msg = $Messages | Get-Random
+                $Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+                $Value = Get-Random -Maximum 1000
+                
+                Add-Content -Path $File -Value "[$Timestamp] [$Level] $Msg $Value" -Encoding UTF8
+            }
         }
         
         Start-Sleep -Milliseconds (Get-Random -Minimum 100 -Maximum 1000)
     }
 }
 
-# Start log appender in background job
-Write-Color "`nStarting log appender in background..." -Color Yellow
-$Job = Start-Job -ScriptBlock ${function:Start-LogAppender} -ArgumentList $NumFiles, $LogDir
+$Job = Start-Job -ScriptBlock $AppenderScript -ArgumentList $NumFiles, $LogDir
+
+# Verify the job started
+Start-Sleep -Milliseconds 500
+$JobState = (Get-Job -Id $Job.Id).State
+if ($JobState -eq "Running") {
+    Write-Color "✓ Background log appender is running (Job ID: $($Job.Id))" -Color Green
+} else {
+    Write-Color "⚠ Warning: Background job state is $JobState" -Color Yellow
+}
 
 # Cleanup function
 function Stop-LogAppender {
     Write-Color "`nStopping log appender..." -Color Yellow
-    $Script:ShouldStop = $true
-    Stop-Job -Job $Job -ErrorAction SilentlyContinue
-    Remove-Job -Job $Job -Force -ErrorAction SilentlyContinue
+    Stop-Job -Job $script:Job -ErrorAction SilentlyContinue
+    Remove-Job -Job $script:Job -Force -ErrorAction SilentlyContinue
 }
 
-# Register cleanup on Ctrl+C
-$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action { Stop-LogAppender }
+# Register cleanup on exit
+Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+    Stop-Job -Job $Job -ErrorAction SilentlyContinue
+    Remove-Job -Job $Job -Force -ErrorAction SilentlyContinue
+} | Out-Null
 
 # Launch vis-grep with the layout
 Write-Color "`nLaunching vis-grep with tree layout..." -Color Cyan
