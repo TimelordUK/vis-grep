@@ -12,11 +12,13 @@ mod preview;
 mod search;
 mod grep_mode;
 mod tail_mode;
+mod splitter;
 
 use config::Config;
 use input_handler::{InputHandler, NavigationCommand};
 use preview::FilePreview;
 use search::{SearchEngine, SearchResult};
+use splitter::{Splitter, SplitterAxis};
 
 // ============================================================================
 // Command-Line Arguments
@@ -72,6 +74,7 @@ impl Default for StartupConfig {
 enum AppMode {
     Grep,
     Tail,
+    Test, // Minimal test mode to debug splitter
 }
 
 // ============================================================================
@@ -585,42 +588,18 @@ impl eframe::App for VisGrepApp {
             self.handle_navigation_command(command);
         }
 
-        // 1. First: ALL TopBottomPanels
+        // Top header panel (non-resizable)
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-            // Header with title and status
             self.render_header(ui);
             ui.separator();
-
-            // Mode selector tabs
             self.render_mode_tabs(ui);
             ui.separator();
         });
 
+        // Bottom status bar
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             self.render_status_bar(ui);
         });
-
-        // Mode-specific top panels
-        match self.mode {
-            AppMode::Grep => {
-                egui::TopBottomPanel::top("grep_controls")
-                    .resizable(true)
-                    .default_height(200.0)
-                    .height_range(150.0..=400.0)
-                    .show(ctx, |ui| {
-                        self.render_grep_mode_ui(ui);
-                    });
-            },
-            AppMode::Tail => {
-                egui::TopBottomPanel::top("tail_controls")
-                    .resizable(true)
-                    .default_height(250.0)
-                    .height_range(150.0..=500.0)
-                    .show(ctx, |ui| {
-                        self.render_tail_mode_controls(ui);
-                    });
-            },
-        }
 
         // 2. Second: SidePanels
         // Get available width to calculate better ranges
@@ -635,7 +614,6 @@ impl eframe::App for VisGrepApp {
                     .default_width((available_width * 0.4).clamp(300.0, 800.0))
                     .width_range(min_panel_width..=max_left_panel_width)
                     .show(ctx, |ui| {
-                        // Add horizontal scrolling
                         egui::ScrollArea::horizontal()
                             .id_salt("grep_left_scroll_h")
                             .show(ui, |ui| {
@@ -644,34 +622,65 @@ impl eframe::App for VisGrepApp {
                     });
             },
             AppMode::Tail => {
-                egui::SidePanel::left("tail_left_panel")
-                    .resizable(true)
-                    .default_width((available_width * 0.5).clamp(400.0, 900.0))
-                    .width_range(min_panel_width..=max_left_panel_width)
-                    .show(ctx, |ui| {
-                        // Direct rendering without horizontal scroll wrapper
-                        // The render_tail_output already handles its own scrolling
-                        self.render_tail_output(ui);
-                    });
+                // No side panels - we'll use custom splitters in CentralPanel
+            },
+            AppMode::Test => {
+                // No side panels in test mode
             },
         }
 
         // 3. Last: CentralPanel
         egui::CentralPanel::default().show(ctx, |ui| {
-            // Debug: show available space
-            let available_rect = ui.available_rect_before_wrap();
-            if available_rect.width() < 50.0 || available_rect.height() < 50.0 {
-                ui.colored_label(
-                    egui::Color32::RED,
-                    format!("Warning: Panel too small: {:.0}x{:.0}", 
-                            available_rect.width(), 
-                            available_rect.height())
-                );
-            } else {
-                match self.mode {
-                    AppMode::Grep => self.render_grep_right_panel(ui),
-                    AppMode::Tail => self.render_tail_preview(ui),
-                }
+            match self.mode {
+                AppMode::Grep => {
+                    let available_rect = ui.available_rect_before_wrap();
+                    if available_rect.width() < 50.0 || available_rect.height() < 50.0 {
+                        ui.colored_label(
+                            egui::Color32::RED,
+                            format!("Warning: Panel too small: {:.0}x{:.0}", 
+                                    available_rect.width(), 
+                                    available_rect.height())
+                        );
+                    } else {
+                        self.render_grep_right_panel(ui);
+                    }
+                },
+                AppMode::Tail => {
+                    // Use custom vertical splitter (horizontal divider line)
+                    Splitter::new("tail_vertical_split", SplitterAxis::Vertical)
+                        .min_size(150.0)
+                        .default_pos(0.3) // 30% top for controls, 70% bottom for content
+                        .show(ui, |ui_top, ui_bottom| {
+                            // Top: Controls and file list
+                            self.render_tail_mode_controls(ui_top);
+                            
+                            // Bottom: Horizontal splitter for output (left) and preview (right)
+                            Splitter::new("tail_horizontal_split", SplitterAxis::Horizontal)
+                                .min_size(200.0)
+                                .default_pos(0.5) // 50/50 split
+                                .show(ui_bottom, |ui_left, ui_right| {
+                                    // Left: Combined output
+                                    self.render_tail_output(ui_left);
+                                    
+                                    // Right: File preview
+                                    self.render_tail_preview(ui_right);
+                                });
+                        });
+                },
+                AppMode::Test => {
+                    Splitter::new("test_split", SplitterAxis::Vertical)
+                        .min_size(100.0)
+                        .default_pos(0.3)
+                        .show(ui, |ui_top, ui_bottom| {
+                            ui_top.heading("Top Panel (Commands & Files)");
+                            ui_top.label("This is the top 30%");
+                            ui_top.label("Drag the horizontal line below to resize");
+                            
+                            ui_bottom.heading("Bottom Panel (Output)");
+                            ui_bottom.label("This is the bottom 70%");
+                            ui_bottom.label("The custom splitter works!");
+                        });
+                },
             }
         });
 
@@ -683,7 +692,10 @@ impl eframe::App for VisGrepApp {
                 self.poll_tail_files();
                 // Handle tail mode navigation
                 self.handle_tail_mode_navigation(ctx);
-            }
+            },
+            AppMode::Test => {
+                // No background tasks for test mode
+            },
         }
 
         ctx.request_repaint();
@@ -1399,6 +1411,7 @@ impl VisGrepApp {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.mode, AppMode::Grep, "🔍 Grep Mode");
             ui.selectable_value(&mut self.mode, AppMode::Tail, "📄 Tail Mode");
+            ui.selectable_value(&mut self.mode, AppMode::Test, "🔧 Test Mode");
         });
     }
 
@@ -1612,22 +1625,58 @@ impl VisGrepApp {
     /// Render status bar showing search stats
     fn render_status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            let total_matches: usize = self
-                .grep_state
-                .results
-                .iter()
-                .map(|r| r.matches.len())
-                .sum();
-            let file_count = self.grep_state.results.len();
+            match self.mode {
+                AppMode::Grep => {
+                    let total_matches: usize = self
+                        .grep_state
+                        .results
+                        .iter()
+                        .map(|r| r.matches.len())
+                        .sum();
+                    let file_count = self.grep_state.results.len();
 
-            ui.label(format!(
-                "Found {} matches in {} files",
-                total_matches, file_count
-            ));
+                    ui.label(format!(
+                        "Found {} matches in {} files",
+                        total_matches, file_count
+                    ));
 
-            if self.grep_state.searching {
-                ui.spinner();
-                ui.label("Searching...");
+                    if self.grep_state.searching {
+                        ui.spinner();
+                        ui.label("Searching...");
+                    }
+                },
+                AppMode::Tail => {
+                    // Tail mode status - show file and buffer info
+                    let buffer_pct = if self.tail_state.max_buffer_lines > 0 {
+                        (self.tail_state.output_buffer.len() as f32
+                            / self.tail_state.max_buffer_lines as f32)
+                            * 100.0
+                    } else {
+                        0.0
+                    };
+
+                    let active_count = self.tail_state.files.iter().filter(|f| f.is_active).count();
+
+                    ui.label(format!(
+                        "Files: {}  Active: {}  Lines: {} / {}  Buffer: {:.1}%  Update: {}ms",
+                        self.tail_state.files.len(),
+                        active_count,
+                        self.tail_state.output_buffer.len(),
+                        self.tail_state.max_buffer_lines,
+                        buffer_pct,
+                        self.tail_state.poll_interval_ms
+                    ));
+
+                    if self.tail_state.lines_dropped > 0 {
+                        ui.colored_label(
+                            egui::Color32::YELLOW,
+                            format!("  ⚠ Dropped: {}", self.tail_state.lines_dropped),
+                        );
+                    }
+                },
+                AppMode::Test => {
+                    ui.label("Test Mode - Splitter working!");
+                },
             }
         });
     }

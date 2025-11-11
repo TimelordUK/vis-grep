@@ -86,11 +86,11 @@ impl VisGrepApp {
 
         ui.separator();
 
-        // File list - use remaining available height
-        let available_height = ui.available_height() - 10.0; // Leave some margin
+        // File list - use a fixed reasonable max height to avoid feedback loop
+        // This prevents the ScrollArea from requesting variable height that causes panel drift
         egui::ScrollArea::vertical()
             .id_salt("file_list_scroll")
-            .max_height(available_height)
+            .max_height(300.0) // Fixed height to prevent content from driving panel size
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 // Add horizontal scrolling for long filenames
