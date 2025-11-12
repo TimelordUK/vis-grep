@@ -14,6 +14,7 @@ mod grep_mode;
 mod tail_mode;
 mod splitter;
 mod tail_layout;
+mod theme;
 
 use config::Config;
 use input_handler::{InputHandler, NavigationCommand};
@@ -21,6 +22,7 @@ use preview::FilePreview;
 use search::{SearchEngine, SearchResult};
 use splitter::{Splitter, SplitterAxis};
 use tail_layout::TailLayout;
+use theme::Theme;
 
 // ============================================================================
 // Command-Line Arguments
@@ -411,6 +413,7 @@ struct VisGrepApp {
     marks: HashMap<char, usize>,
 
     config: Config,
+    theme: Theme,
 }
 
 impl Default for VisGrepApp {
@@ -437,6 +440,9 @@ impl VisGrepApp {
             }
         }
 
+        let config = Config::load();
+        let theme = config.theme;
+        
         Self {
             mode: startup_config.mode,
 
@@ -451,7 +457,8 @@ impl VisGrepApp {
             input_handler: InputHandler::new(),
             marks: HashMap::new(),
 
-            config: Config::load(),
+            config,
+            theme,
         }
     }
 
@@ -669,6 +676,9 @@ impl VisGrepApp {
 
 impl eframe::App for VisGrepApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Apply theme
+        self.theme.apply(ctx);
+        
         // Process keyboard input and handle navigation commands
         if let Some(command) = self.input_handler.process_input(ctx) {
             self.handle_navigation_command(command);
@@ -1495,6 +1505,18 @@ impl VisGrepApp {
             ui.heading("VisGrep");
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Theme toggle button
+                if ui.button(format!("Theme: {}", self.theme.name())).clicked() {
+                    self.theme.cycle();
+                    self.config.theme = self.theme;
+                    // Save config with new theme
+                    if let Err(e) = self.config.save() {
+                        log::error!("Failed to save config: {}", e);
+                    }
+                }
+                
+                ui.separator();
+                
                 // Show pending input state (e.g., "3" or "g")
                 let status = self.input_handler.get_status();
                 if !status.is_empty() {

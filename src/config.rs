@@ -2,6 +2,7 @@ use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use crate::theme::Theme;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FolderPreset {
@@ -24,6 +25,8 @@ pub struct Config {
     pub folder_presets: Vec<FolderPreset>,
     #[serde(default)]
     pub saved_patterns: Vec<SavedPattern>,
+    #[serde(default)]
+    pub theme: Theme,
 }
 
 impl Default for Config {
@@ -40,6 +43,7 @@ impl Default for Config {
                 },
             ],
             saved_patterns: vec![],
+            theme: Theme::default(),
         }
     }
 }
@@ -140,6 +144,7 @@ impl Config {
                     category: "Errors".to_string(),
                 },
             ],
+            theme: Theme::default(),
         };
 
         example.save()
