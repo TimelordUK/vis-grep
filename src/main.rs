@@ -989,12 +989,14 @@ impl VisGrepApp {
         #[cfg(target_os = "windows")]
         {
             // On Windows, use 'explorer /select,' to open Explorer and select the file
-            let path_str = file_path.to_string_lossy();
-            println!("Windows Explorer command: explorer /select, \"{}\"", path_str);
-            info!("Windows Explorer command: explorer /select, \"{}\"", path_str);
+            // Windows Explorer requires backslashes in paths
+            let path_str = file_path.to_string_lossy().replace('/', "\\");
+            println!("Windows Explorer command: explorer /select,\"{}\"", path_str);
+            info!("Windows Explorer command: explorer /select,\"{}\"", path_str);
             
+            // Note: No space after /select, and path should be quoted
             if let Err(e) = std::process::Command::new("explorer")
-                .args(&["/select,", &path_str])
+                .arg(format!("/select,{}", path_str))
                 .spawn()
             {
                 println!("Failed to open explorer: {}", e);
