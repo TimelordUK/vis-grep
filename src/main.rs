@@ -200,19 +200,26 @@ struct TailedFile {
 
 impl TailedFile {
     fn new(path: PathBuf) -> std::io::Result<Self> {
-        let display_name = path
+        // Resolve to absolute path
+        let absolute_path = if path.is_absolute() {
+            path
+        } else {
+            std::env::current_dir()?.join(&path)
+        };
+        
+        let display_name = absolute_path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown")
             .to_string();
 
         // Try to open the file and get initial size
-        let file = File::open(&path)?;
+        let file = File::open(&absolute_path)?;
         let metadata = file.metadata()?;
         let size = metadata.len();
 
         Ok(Self {
-            path,
+            path: absolute_path,
             display_name,
             file_handle: Some(file),
             last_size: size,
@@ -970,15 +977,30 @@ impl VisGrepApp {
     
     /// Open a file path in the system file explorer (reusable static method)
     fn open_path_in_explorer(file_path: &std::path::Path) {
+        // Print to console for debugging
+        println!("Opening file in explorer: {:?}", file_path);
+        
+        if let Some(parent) = file_path.parent() {
+            println!("Parent directory: {:?}", parent);
+        }
+        
+        info!("Opening file in explorer: {:?}", file_path);
+        
         #[cfg(target_os = "windows")]
         {
             // On Windows, use 'explorer /select,' to open Explorer and select the file
+            let path_str = file_path.to_string_lossy();
+            println!("Windows Explorer command: explorer /select, \"{}\"", path_str);
+            info!("Windows Explorer command: explorer /select, \"{}\"", path_str);
+            
             if let Err(e) = std::process::Command::new("explorer")
-                .args(&["/select,", &file_path.to_string_lossy()])
+                .args(&["/select,", &path_str])
                 .spawn()
             {
+                println!("Failed to open explorer: {}", e);
                 info!("Failed to open explorer: {}", e);
             } else {
+                println!("Opened file in Explorer: {:?}", file_path);
                 info!("Opened file in Explorer: {:?}", file_path);
             }
         }
