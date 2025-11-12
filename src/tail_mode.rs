@@ -115,6 +115,12 @@ impl VisGrepApp {
         } else if self.tail_state.layout.is_some() {
             // Tree layout mode
             ui.vertical(|ui| {
+                // Apply smaller font size for the tree (80% of the main font)
+                let tree_font_size = self.tail_state.font_size * 0.8;
+                let font_id = egui::FontId::new(tree_font_size, egui::FontFamily::Proportional);
+                ui.style_mut().text_styles.insert(egui::TextStyle::Body, font_id.clone());
+                ui.style_mut().text_styles.insert(egui::TextStyle::Button, font_id);
+                
                 // Clone the group IDs to avoid borrow checker issues
                 let group_ids: Vec<String> = if let Some(layout) = &self.tail_state.layout {
                     layout.root_groups.iter().map(|g| g.id.clone()).collect()
@@ -142,6 +148,12 @@ impl VisGrepApp {
         } else {
             // Flat list mode (original)
             ui.vertical(|ui| {
+                // Apply smaller font size for the tree (80% of the main font)
+                let tree_font_size = self.tail_state.font_size * 0.8;
+                let font_id = egui::FontId::new(tree_font_size, egui::FontFamily::Proportional);
+                ui.style_mut().text_styles.insert(egui::TextStyle::Body, font_id.clone());
+                ui.style_mut().text_styles.insert(egui::TextStyle::Button, font_id);
+                
                 for idx in 0..self.tail_state.files.len() {
                     self.render_file_entry(ui, idx, 0);
                 }
@@ -171,7 +183,8 @@ impl VisGrepApp {
         };
         
         if let Some((name, icon, collapsed, has_activity, active_count, total_count, child_group_ids, files)) = group_info {
-            let indent = depth as f32 * 20.0;
+            // Scale indent based on font size (reduced from 20.0 to be more compact)
+            let indent = depth as f32 * (self.tail_state.font_size * 1.0);
             
             ui.horizontal(|ui| {
                 ui.add_space(indent);
@@ -237,7 +250,8 @@ impl VisGrepApp {
     
     fn render_file_entry(&mut self, ui: &mut egui::Ui, file_idx: usize, depth: usize) {
         let file = &mut self.tail_state.files[file_idx];
-        let indent = depth as f32 * 20.0;
+        // Scale indent based on font size
+        let indent = depth as f32 * (self.tail_state.font_size * 1.0);
         
         ui.horizontal(|ui| {
             ui.add_space(indent);
@@ -251,10 +265,11 @@ impl VisGrepApp {
             };
             ui.colored_label(color, indicator);
 
-            // Filename (selectable) with fixed width
+            // Filename (selectable) - scale width based on font size
             let selected = self.tail_state.preview_selected_file == Some(file_idx);
+            let entry_width = 200.0 + (self.tail_state.font_size - 12.0) * 5.0; // Scale width with font
             ui.allocate_ui_with_layout(
-                egui::Vec2::new(300.0, 20.0),
+                egui::Vec2::new(entry_width, self.tail_state.font_size + 4.0),
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
                     if ui.selectable_label(selected, &file.display_name).clicked() {
