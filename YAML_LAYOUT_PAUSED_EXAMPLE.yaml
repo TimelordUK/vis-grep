@@ -1,0 +1,39 @@
+# Example YAML layout with paused files
+# Files can be set to start paused to prevent overwhelming the UI with busy logs
+
+name: "Production Logs with Busy Files Paused"
+version: 1
+
+settings:
+  poll_interval_ms: 500
+  auto_expand_active: true
+
+groups:
+  - name: "Web Services"
+    icon: "🌐"
+    files:
+      - path: "/var/log/nginx/access.log"
+        name: "Nginx Access"
+        paused: true  # This is a very busy log, start it paused
+      - path: "/var/log/nginx/error.log"
+        name: "Nginx Errors"
+        # No paused setting means it defaults to false (active)
+
+  - name: "Application Logs"
+    icon: "📱"
+    files:
+      - path: "d:/ctf/logs/BookingEngine.log"
+        name: "Booking Engine"
+      - path: "d:/ctf/logs/PaymentGateway.log"
+        name: "Payment Gateway"
+        paused: true  # Another busy log to start paused
+      - path: "d:/ctf/logs/UserService.log"
+        name: "User Service"
+
+  - name: "System Logs"
+    icon: "🖥️"
+    files:
+      - path: "/var/log/syslog"
+        paused: true  # System logs can be very noisy
+      - path: "/var/log/auth.log"
+        # Auth logs are important, keep them active

@@ -69,6 +69,8 @@ pub struct FileEntry {
     pub name: Option<String>, // Display name override
     #[serde(default)]
     pub pattern: bool, // If true, path is a glob pattern
+    #[serde(default)]
+    pub paused: bool, // If true, file starts paused
 
     // Reference to actual TailedFile (set at runtime)
     #[serde(skip)]
@@ -156,8 +158,8 @@ impl TailLayout {
         None
     }
 
-    /// Get all file paths from the layout (flattened)
-    pub fn get_all_file_paths(&self) -> Vec<(PathBuf, Option<String>, String)> {
+    /// Get all file paths from the layout (flattened) with paused status
+    pub fn get_all_file_paths(&self) -> Vec<(PathBuf, Option<String>, String, bool)> {
         let mut paths = Vec::new();
         for group in &self.root_groups {
             Self::collect_file_paths(group, &mut paths);
@@ -165,10 +167,10 @@ impl TailLayout {
         paths
     }
 
-    fn collect_file_paths(group: &FileGroup, paths: &mut Vec<(PathBuf, Option<String>, String)>) {
+    fn collect_file_paths(group: &FileGroup, paths: &mut Vec<(PathBuf, Option<String>, String, bool)>) {
         // Add files from this group
         for file in &group.files {
-            paths.push((file.path.clone(), file.name.clone(), group.id.clone()));
+            paths.push((file.path.clone(), file.name.clone(), group.id.clone(), file.paused));
         }
         
         // Recursively add files from subgroups

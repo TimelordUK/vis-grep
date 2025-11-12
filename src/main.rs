@@ -383,12 +383,13 @@ impl TailState {
         
         // Add all files from the layout
         let file_paths = layout.get_all_file_paths();
-        for (path, custom_name, group_id) in file_paths {
+        for (path, custom_name, group_id, paused) in file_paths {
             if let Ok(mut file) = TailedFile::new(path) {
                 if let Some(name) = custom_name {
                     file.display_name = name;
                 }
                 file.group_id = Some(group_id);
+                file.paused = paused;  // Apply paused setting from YAML
                 self.files.push(file);
             }
         }
