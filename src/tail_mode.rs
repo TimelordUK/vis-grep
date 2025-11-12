@@ -272,11 +272,26 @@ impl VisGrepApp {
                 egui::Vec2::new(entry_width, self.tail_state.font_size + 4.0),
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
-                    if ui.selectable_label(selected, &file.display_name).clicked() {
+                    // Create selectable label and handle interaction
+                    let response = ui.selectable_label(selected, &file.display_name);
+                    
+                    if response.clicked() {
                         self.tail_state.preview_selected_file = Some(file_idx);
                         self.tail_state.preview_needs_reload = true;
                         self.tail_state.preview_mode = PreviewMode::Following;
                     }
+                    
+                    // Extract parent directory
+                    let parent_dir = file.path.parent()
+                        .and_then(|p| p.to_str())
+                        .unwrap_or("");
+                    
+                    // Show tooltip with full path and parent directory
+                    response.on_hover_text(format!(
+                        "Full path: {}\nDirectory: {}",
+                        file.path.display(),
+                        parent_dir
+                    ));
                 },
             );
 
@@ -434,11 +449,30 @@ impl VisGrepApp {
 
                 // Header
                 ui.horizontal(|ui| {
-                    ui.label(format!(
-                        "Preview: {} ({:.1} KB)",
-                        file.display_name,
-                        file.last_size as f64 / 1024.0
-                    ));
+                    // Extract parent directory for display
+                    let parent_dir = file.path.parent()
+                        .and_then(|p| p.file_name())
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("");
+                    
+                    let header_text = if !parent_dir.is_empty() {
+                        format!(
+                            "Preview: {}/{} ({:.1} KB)",
+                            parent_dir,
+                            file.display_name,
+                            file.last_size as f64 / 1024.0
+                        )
+                    } else {
+                        format!(
+                            "Preview: {} ({:.1} KB)",
+                            file.display_name,
+                            file.last_size as f64 / 1024.0
+                        )
+                    };
+                    
+                    // Label with tooltip showing full path
+                    let label_response = ui.label(header_text);
+                    label_response.on_hover_text(format!("Full path: {}", file.path.display()));
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // Pause/Follow toggle
