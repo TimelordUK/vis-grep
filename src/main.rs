@@ -965,7 +965,11 @@ impl VisGrepApp {
         }
 
         let file_path = &self.grep_state.results[current_file_idx].file_path;
-
+        Self::open_path_in_explorer(file_path);
+    }
+    
+    /// Open a file path in the system file explorer (reusable static method)
+    fn open_path_in_explorer(file_path: &std::path::Path) {
         #[cfg(target_os = "windows")]
         {
             // On Windows, use 'explorer /select,' to open Explorer and select the file

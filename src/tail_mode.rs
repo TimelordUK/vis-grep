@@ -494,6 +494,13 @@ impl VisGrepApp {
                         
                         ui.separator();
                         
+                        // Open in Explorer button
+                        if ui.button("📁 Explorer").on_hover_text("Open file location in Explorer/Finder").clicked() {
+                            VisGrepApp::open_path_in_explorer(&file.path);
+                        }
+                        
+                        ui.separator();
+                        
                         // Buffer size control
                         ui.label("Lines:");
                         let response = ui.add(

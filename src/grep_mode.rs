@@ -70,6 +70,13 @@ impl VisGrepApp {
                     self.grep_state.collapsing_state.insert(i, false);
                 }
             }
+            
+            ui.separator();
+            
+            // Open in Explorer button
+            if ui.button("📁 Open File").on_hover_text("Open selected file location in Explorer/Finder").clicked() {
+                self.open_in_explorer();
+            }
         });
         ui.separator();
 
