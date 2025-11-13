@@ -335,6 +335,21 @@ impl VisGrepApp {
             if ui.small_button(if file.paused { "▶" } else { "⏸" }).clicked() {
                 file.paused = !file.paused;
             }
+            
+            // Copy path button (small)
+            if ui.small_button("📋").on_hover_text("Copy full path").clicked() {
+                use arboard::Clipboard;
+                match Clipboard::new() {
+                    Ok(mut clipboard) => {
+                        let path_str = file.path.to_string_lossy().to_string();
+                        match clipboard.set_text(&path_str) {
+                            Ok(_) => log::info!("Copied path to clipboard: {}", path_str),
+                            Err(e) => log::error!("Failed to copy path: {}", e),
+                        }
+                    }
+                    Err(e) => log::error!("Failed to access clipboard: {}", e),
+                }
+            }
         });
         
         // Add minimal spacing between rows
@@ -521,6 +536,21 @@ impl VisGrepApp {
                         // Open in Explorer button
                         if ui.button("📁 Explorer").on_hover_text("Open file location in Explorer/Finder").clicked() {
                             VisGrepApp::open_path_in_explorer(&file.path);
+                        }
+                        
+                        // Copy path button
+                        if ui.button("📋 Copy Path").on_hover_text("Copy full file path to clipboard").clicked() {
+                            use arboard::Clipboard;
+                            match Clipboard::new() {
+                                Ok(mut clipboard) => {
+                                    let path_str = file.path.to_string_lossy().to_string();
+                                    match clipboard.set_text(&path_str) {
+                                        Ok(_) => log::info!("Copied path to clipboard: {}", path_str),
+                                        Err(e) => log::error!("Failed to copy path: {}", e),
+                                    }
+                                }
+                                Err(e) => log::error!("Failed to access clipboard: {}", e),
+                            }
                         }
                         
                         ui.separator();
