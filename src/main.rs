@@ -177,7 +177,6 @@ struct TailedFile {
     display_name: String,
 
     // File monitoring
-    file_handle: Option<File>,
     last_size: u64,
     last_position: u64,
 
@@ -213,15 +212,13 @@ impl TailedFile {
             .unwrap_or("unknown")
             .to_string();
 
-        // Try to open the file and get initial size
-        let file = File::open(&absolute_path)?;
-        let metadata = file.metadata()?;
+        // Get initial file size without keeping handle open
+        let metadata = std::fs::metadata(&absolute_path)?;
         let size = metadata.len();
 
         Ok(Self {
             path: absolute_path,
             display_name,
-            file_handle: Some(file),
             last_size: size,
             last_position: size, // Start at end (like tail -f)
             is_active: false,
@@ -239,6 +236,12 @@ impl TailedFile {
         // Re-open file to get fresh metadata
         let metadata = std::fs::metadata(&self.path)?;
         let current_size = metadata.len();
+        
+        // Debug output for file rotation detection
+        if current_size < self.last_size {
+            info!("File rotation detected for {}: size decreased from {} to {}", 
+                self.display_name, self.last_size, current_size);
+        }
 
         if current_size > self.last_size {
             // File grew - read new content
