@@ -1,8 +1,15 @@
-use crate::{PreviewMode, VisGrepApp, get_color_for_file};
+use crate::{PreviewMode, VisGrepApp, get_color_for_file, filter};
 use eframe::egui;
 
 impl VisGrepApp {
     pub fn render_tail_mode_controls(&mut self, ui: &mut egui::Ui) {
+        
+        // Tree filter
+        if filter::tree::render_tree_filter(ui, &mut self.tail_state.tree_filter) {
+            // Filter changed, we'll handle visibility in the file list rendering
+        }
+        
+        ui.separator();
         
         // File list header
         ui.horizontal(|ui| {
@@ -140,12 +147,20 @@ impl VisGrepApp {
                 let mut has_ungrouped = false;
                 for idx in 0..self.tail_state.files.len() {
                     if self.tail_state.files[idx].group_id.is_none() {
-                        if !has_ungrouped {
-                            has_ungrouped = true;
-                            ui.separator();
-                            ui.label(egui::RichText::new("Ungrouped Files").strong());
+                        // Check if file is visible
+                        let file = &self.tail_state.files[idx];
+                        if filter::tree::is_file_visible(
+                            &self.tail_state.tree_filter,
+                            &file.path.to_string_lossy(),
+                            &file.display_name
+                        ) {
+                            if !has_ungrouped {
+                                has_ungrouped = true;
+                                ui.separator();
+                                ui.label(egui::RichText::new("Ungrouped Files").strong());
+                            }
+                            self.render_file_entry(ui, idx, 0);
                         }
-                        self.render_file_entry(ui, idx, 0);
                     }
                 }
             });
@@ -167,6 +182,37 @@ impl VisGrepApp {
                 }
             });
         }
+    }
+    
+    fn group_has_visible_content(&self, group_id: &str) -> bool {
+        if let Some(layout) = &self.tail_state.layout {
+            if let Some(group) = layout.find_group(group_id) {
+                // Check files
+                let has_visible_files = group.files.iter().any(|entry| {
+                    if let Some(idx) = entry.tailed_file_idx {
+                        if idx < self.tail_state.files.len() {
+                            let file = &self.tail_state.files[idx];
+                            return filter::tree::is_file_visible(
+                                &self.tail_state.tree_filter,
+                                &file.path.to_string_lossy(),
+                                &file.display_name
+                            );
+                        }
+                    }
+                    false
+                });
+                
+                if has_visible_files {
+                    return true;
+                }
+                
+                // Check child groups recursively
+                return group.groups.iter().any(|child| {
+                    self.group_has_visible_content(&child.id)
+                });
+            }
+        }
+        false
     }
     
     fn render_file_group_by_id(&mut self, ui: &mut egui::Ui, group_id: &str, depth: usize) {
@@ -191,6 +237,30 @@ impl VisGrepApp {
         };
         
         if let Some((name, icon, collapsed, has_activity, active_count, total_count, child_group_ids, files)) = group_info {
+            // Check if any files in this group are visible
+            let has_visible_files = files.iter().any(|entry| {
+                if let Some(idx) = entry.tailed_file_idx {
+                    if idx < self.tail_state.files.len() {
+                        let file = &self.tail_state.files[idx];
+                        return filter::tree::is_file_visible(
+                            &self.tail_state.tree_filter,
+                            &file.path.to_string_lossy(),
+                            &file.display_name
+                        );
+                    }
+                }
+                false
+            });
+            
+            // Check if any child groups have visible content
+            let has_visible_children = child_group_ids.iter().any(|child_id| {
+                self.group_has_visible_content(child_id)
+            });
+            
+            // Skip this group if nothing is visible
+            if !has_visible_files && !has_visible_children && self.tail_state.tree_filter.active {
+                return;
+            }
             // Scale indent based on font size (reduced from 20.0 to be more compact)
             let indent = depth as f32 * (self.tail_state.font_size * 1.0);
             
@@ -266,6 +336,15 @@ impl VisGrepApp {
     
     fn render_file_entry(&mut self, ui: &mut egui::Ui, file_idx: usize, depth: usize) {
         let file = &mut self.tail_state.files[file_idx];
+        
+        // Check if file should be visible based on filter
+        if !filter::tree::is_file_visible(
+            &self.tail_state.tree_filter,
+            &file.path.to_string_lossy(),
+            &file.display_name
+        ) {
+            return;
+        }
         // Scale indent based on font size
         let indent = depth as f32 * (self.tail_state.font_size * 1.0);
         
@@ -370,7 +449,18 @@ impl VisGrepApp {
     pub fn render_tail_output(&mut self, ui: &mut egui::Ui) {
         // Output header
         ui.horizontal(|ui| {
-            ui.label("Output (Combined):");
+            // Check if output is filtered
+            let is_filtered = self.tail_state.tree_filter.active && 
+                             self.tail_state.tree_filter.apply_to_output;
+            
+            if is_filtered {
+                ui.label(
+                    egui::RichText::new("Output (Filtered)")
+                        .color(egui::Color32::from_rgb(255, 200, 100))
+                );
+            } else {
+                ui.label("Output (Combined):");
+            }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
@@ -410,7 +500,27 @@ impl VisGrepApp {
                     let font_id = egui::FontId::new(self.tail_state.font_size, egui::FontFamily::Monospace);
                     ui.style_mut().text_styles.insert(egui::TextStyle::Monospace, font_id);
 
+                    let is_filtered = self.tail_state.tree_filter.active && 
+                                     self.tail_state.tree_filter.apply_to_output;
+                    
                     for log_line in &self.tail_state.output_buffer {
+                        // Check if this line should be visible based on tree filter
+                        if is_filtered {
+                            // Find the file that generated this log line
+                            let should_show = self.tail_state.files.iter().any(|file| {
+                                file.display_name == log_line.source_file &&
+                                filter::tree::is_file_visible(
+                                    &self.tail_state.tree_filter,
+                                    &file.path.to_string_lossy(),
+                                    &file.display_name
+                                )
+                            });
+                            
+                            if !should_show {
+                                continue;
+                            }
+                        }
+                        
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 4.0;
 
@@ -435,12 +545,36 @@ impl VisGrepApp {
                         });
                     }
 
-                    if self.tail_state.output_buffer.is_empty() {
-                        ui.label(
-                            egui::RichText::new("Waiting for log output...")
-                                .italics()
-                                .color(egui::Color32::GRAY),
-                        );
+                    // Check if we're showing nothing due to filtering
+                    let visible_count = if is_filtered {
+                        self.tail_state.output_buffer.iter().filter(|log_line| {
+                            self.tail_state.files.iter().any(|file| {
+                                file.display_name == log_line.source_file &&
+                                filter::tree::is_file_visible(
+                                    &self.tail_state.tree_filter,
+                                    &file.path.to_string_lossy(),
+                                    &file.display_name
+                                )
+                            })
+                        }).count()
+                    } else {
+                        self.tail_state.output_buffer.len()
+                    };
+                    
+                    if visible_count == 0 {
+                        if is_filtered && !self.tail_state.output_buffer.is_empty() {
+                            ui.label(
+                                egui::RichText::new("No output from filtered files")
+                                    .italics()
+                                    .color(egui::Color32::from_rgb(255, 200, 100)),
+                            );
+                        } else {
+                            ui.label(
+                                egui::RichText::new("Waiting for log output...")
+                                    .italics()
+                                    .color(egui::Color32::GRAY),
+                            );
+                        }
                     }
                 });
         });
@@ -587,6 +721,15 @@ impl VisGrepApp {
 
                 ui.separator();
 
+                // Filter input UI
+                if filter::preview::render_filter_input(ui, &mut self.tail_state.preview_filter) {
+                    // Filter changed, update matches
+                    filter::preview::update_filter_matches(
+                        &mut self.tail_state.preview_filter,
+                        &self.tail_state.preview_content
+                    );
+                }
+
                 // Content area
                 // Content area - use all available space
                 let scroll_area = if self.tail_state.preview_mode == PreviewMode::Following {
@@ -617,18 +760,22 @@ impl VisGrepApp {
                                     .color(egui::Color32::GRAY),
                             );
                         } else {
-                            for (line_num, line) in
+                            let filter = &self.tail_state.preview_filter;
+                            
+                            for (line_idx, line) in
                                 self.tail_state.preview_content.iter().enumerate()
                             {
-                                ui.horizontal(|ui| {
-                                    // Line number
-                                    ui.label(
-                                        egui::RichText::new(format!("{:4} ", line_num + 1))
-                                            .color(egui::Color32::GRAY),
-                                    );
-                                    // Content
-                                    ui.label(line);
-                                });
+                                let is_match = filter.match_lines.contains(&line_idx);
+                                let is_current = filter.current_match_line() == Some(line_idx);
+                                
+                                filter::preview::render_filtered_line(
+                                    ui,
+                                    line,
+                                    line_idx + 1,
+                                    is_match,
+                                    is_current,
+                                    filter
+                                );
                             }
                         }
                     });
@@ -645,7 +792,7 @@ impl VisGrepApp {
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new("j/k: scroll  gg/G: jump")
+                        egui::RichText::new("j/k: scroll  gg/G: jump  /: filter  n/N: next/prev match")
                             .color(egui::Color32::GRAY)
                             .small(),
                     );
@@ -718,6 +865,38 @@ impl VisGrepApp {
         // Handle preview navigation (if a file is selected)
         if self.tail_state.preview_selected_file.is_some() {
             ctx.input(|i| {
+                // / - activate filter
+                if i.key_pressed(egui::Key::Slash) && !self.tail_state.preview_filter.active {
+                    self.tail_state.preview_filter.activate();
+                }
+                
+                // Escape - deactivate filter
+                if i.key_pressed(egui::Key::Escape) && self.tail_state.preview_filter.active {
+                    self.tail_state.preview_filter.deactivate();
+                }
+                
+                // n - next match
+                if i.key_pressed(egui::Key::N) && !i.modifiers.shift && self.tail_state.preview_filter.active {
+                    self.tail_state.preview_filter.next_match();
+                    if let Some(line_idx) = self.tail_state.preview_filter.current_match_line() {
+                        // Calculate scroll position to center the match
+                        let line_height = 20.0; // Approximate line height
+                        self.tail_state.preview_scroll_offset = (line_idx as f32 * line_height).max(0.0);
+                        self.tail_state.preview_mode = PreviewMode::Paused;
+                    }
+                }
+                
+                // N (Shift+n) - previous match  
+                if i.key_pressed(egui::Key::N) && i.modifiers.shift && self.tail_state.preview_filter.active {
+                    self.tail_state.preview_filter.prev_match();
+                    if let Some(line_idx) = self.tail_state.preview_filter.current_match_line() {
+                        // Calculate scroll position to center the match
+                        let line_height = 20.0; // Approximate line height
+                        self.tail_state.preview_scroll_offset = (line_idx as f32 * line_height).max(0.0);
+                        self.tail_state.preview_mode = PreviewMode::Paused;
+                    }
+                }
+                
                 // j - scroll down
                 if i.key_pressed(egui::Key::J) && !i.modifiers.ctrl {
                     self.tail_state.preview_scroll_offset += 20.0;

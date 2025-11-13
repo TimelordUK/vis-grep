@@ -78,6 +78,19 @@ pub struct FileEntry {
 }
 
 impl TailLayout {
+    /// Link a file entry to its index in the TailedFile vector
+    pub fn link_file_to_index(&mut self, file_path: &PathBuf, group_id: &str, file_idx: usize) {
+        // Find the file entry in the appropriate group and update its index
+        if let Some(group) = self.find_group_mut(group_id) {
+            for entry in &mut group.files {
+                if entry.path == *file_path {
+                    entry.tailed_file_idx = Some(file_idx);
+                    break;
+                }
+            }
+        }
+    }
+    
     /// Load a layout from a YAML file
     pub fn from_yaml_file(path: &PathBuf) -> Result<Self, String> {
         let contents = std::fs::read_to_string(path)

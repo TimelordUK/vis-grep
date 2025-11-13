@@ -15,6 +15,7 @@ mod tail_mode;
 mod splitter;
 mod tail_layout;
 mod theme;
+mod filter;
 
 use config::Config;
 use input_handler::{InputHandler, NavigationCommand};
@@ -296,8 +297,10 @@ struct TailState {
     paused_all: bool,
     auto_scroll: bool,
 
-    // Filtering (future)
+    // Filtering
     filter_pattern: String,
+    preview_filter: filter::PreviewFilter,
+    tree_filter: filter::TreeFilter,
 
     // Polling
     last_poll_time: Instant,
@@ -338,6 +341,8 @@ impl TailState {
             paused_all: false,
             auto_scroll: true,
             filter_pattern: String::new(),
+            preview_filter: filter::PreviewFilter::new(),
+            tree_filter: filter::TreeFilter::new(),
             last_poll_time: Instant::now(),
             poll_interval_ms: 250,
             total_lines_received: 0,
@@ -377,7 +382,7 @@ impl TailState {
     
     fn load_layout(&mut self, layout_path: &PathBuf) -> Result<(), String> {
         // Load the layout file
-        let layout = TailLayout::from_yaml_file(layout_path)?;
+        let mut layout = TailLayout::from_yaml_file(layout_path)?;
         
         // Apply layout settings
         if let Some(poll_ms) = layout.settings.poll_interval_ms {
@@ -387,13 +392,19 @@ impl TailState {
         // Add all files from the layout
         let file_paths = layout.get_all_file_paths();
         for (path, custom_name, group_id, paused) in file_paths {
-            if let Ok(mut file) = TailedFile::new(path) {
+            if let Ok(mut file) = TailedFile::new(path.clone()) {
                 if let Some(name) = custom_name {
                     file.display_name = name;
                 }
-                file.group_id = Some(group_id);
+                file.group_id = Some(group_id.clone());
                 file.paused = paused;  // Apply paused setting from YAML
+                
+                // Store the index before pushing
+                let file_idx = self.files.len();
                 self.files.push(file);
+                
+                // Update the layout to link to this file
+                layout.link_file_to_index(&path, &group_id, file_idx);
             }
         }
         
@@ -645,6 +656,14 @@ impl VisGrepApp {
                     Ok(lines) => {
                         self.tail_state.preview_content = lines;
                         self.tail_state.preview_needs_reload = false;
+                        
+                        // Update filter matches if filter is active
+                        if self.tail_state.preview_filter.active {
+                            filter::preview::update_filter_matches(
+                                &mut self.tail_state.preview_filter,
+                                &self.tail_state.preview_content
+                            );
+                        }
                     }
                     Err(e) => {
                         info!("Error loading preview for {}: {}", file.display_name, e);
