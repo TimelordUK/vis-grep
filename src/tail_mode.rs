@@ -119,7 +119,11 @@ impl VisGrepApp {
                 let tree_font_size = self.tail_state.font_size * 0.8;
                 let font_id = egui::FontId::new(tree_font_size, egui::FontFamily::Proportional);
                 ui.style_mut().text_styles.insert(egui::TextStyle::Body, font_id.clone());
-                ui.style_mut().text_styles.insert(egui::TextStyle::Button, font_id);
+                ui.style_mut().text_styles.insert(egui::TextStyle::Button, font_id.clone());
+                
+                // Reduce spacing between items
+                ui.spacing_mut().item_spacing.y = 1.0;
+                ui.spacing_mut().button_padding.y = 1.0;
                 
                 // Clone the group IDs to avoid borrow checker issues
                 let group_ids: Vec<String> = if let Some(layout) = &self.tail_state.layout {
@@ -152,7 +156,11 @@ impl VisGrepApp {
                 let tree_font_size = self.tail_state.font_size * 0.8;
                 let font_id = egui::FontId::new(tree_font_size, egui::FontFamily::Proportional);
                 ui.style_mut().text_styles.insert(egui::TextStyle::Body, font_id.clone());
-                ui.style_mut().text_styles.insert(egui::TextStyle::Button, font_id);
+                ui.style_mut().text_styles.insert(egui::TextStyle::Button, font_id.clone());
+                
+                // Reduce spacing between items
+                ui.spacing_mut().item_spacing.y = 1.0;
+                ui.spacing_mut().button_padding.y = 1.0;
                 
                 for idx in 0..self.tail_state.files.len() {
                     self.render_file_entry(ui, idx, 0);
@@ -186,7 +194,12 @@ impl VisGrepApp {
             // Scale indent based on font size (reduced from 20.0 to be more compact)
             let indent = depth as f32 * (self.tail_state.font_size * 1.0);
             
-            ui.horizontal(|ui| {
+            // Scale row height with font size
+            let row_height = self.tail_state.font_size + 2.0; // Minimal padding
+            ui.allocate_ui_with_layout(
+                egui::Vec2::new(ui.available_width(), row_height),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
                 ui.add_space(indent);
                 
                 // Expand/collapse arrow
@@ -230,6 +243,9 @@ impl VisGrepApp {
                 });
             });
             
+            // Add minimal spacing between rows
+            ui.add_space(1.0);
+            
             // Render children if expanded
             if !collapsed {
                 // Render subgroups
@@ -253,7 +269,12 @@ impl VisGrepApp {
         // Scale indent based on font size
         let indent = depth as f32 * (self.tail_state.font_size * 1.0);
         
-        ui.horizontal(|ui| {
+        // Scale row height with font size
+        let row_height = self.tail_state.font_size + 2.0; // Minimal padding
+        ui.allocate_ui_with_layout(
+            egui::Vec2::new(ui.available_width(), row_height),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
             ui.add_space(indent);
             
             // Activity indicator
@@ -315,6 +336,9 @@ impl VisGrepApp {
                 file.paused = !file.paused;
             }
         });
+        
+        // Add minimal spacing between rows
+        ui.add_space(1.0);
     }
     
     fn pause_group(&mut self, group_id: &str) {
