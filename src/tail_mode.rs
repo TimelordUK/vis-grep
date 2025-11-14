@@ -398,17 +398,25 @@ impl VisGrepApp {
             // File size
             ui.label(format!("{:.1} KB", file.last_size as f64 / 1024.0));
 
-            // Activity info
-            if file.is_active && file.lines_since_last_read > 0 {
-                ui.label(
-                    egui::RichText::new(format!("(+{} lines)", file.lines_since_last_read))
-                        .color(egui::Color32::from_rgb(255, 200, 100))
-                );
+            // Activity info - fixed width to prevent jumping
+            let status_text = if file.is_active && file.lines_since_last_read > 0 {
+                format!("(+{} lines)", file.lines_since_last_read)
             } else if !file.is_active {
-                ui.label("(idle)");
+                "(idle)".to_string()
             } else {
-                ui.add_space(50.0);
-            }
+                "".to_string()
+            };
+
+            let status_color = if file.is_active && file.lines_since_last_read > 0 {
+                egui::Color32::from_rgb(255, 200, 100)
+            } else {
+                egui::Color32::GRAY
+            };
+
+            ui.add_sized(
+                egui::vec2(100.0, 20.0),
+                egui::Label::new(egui::RichText::new(status_text).color(status_color))
+            );
 
             // Pause button
             if ui.small_button(if file.paused { "▶" } else { "⏸" }).clicked() {
