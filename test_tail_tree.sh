@@ -192,6 +192,10 @@ echo -e "${BLUE}Press Ctrl+C to stop${NC}\n"
 # Build and run vis-grep
 cargo build --release 2>/dev/null || cargo build
 
+# Force X11 backend for WSL compatibility
+unset WAYLAND_DISPLAY
+export WINIT_UNIX_BACKEND=x11
+
 if [ -f target/release/vis-grep ]; then
     ./target/release/vis-grep --tail-layout "$LAYOUT_FILE"
 else

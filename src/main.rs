@@ -1860,6 +1860,10 @@ impl VisGrepApp {
 }
 
 fn main() -> eframe::Result<()> {
+    // Force X11 backend on Linux for WSL compatibility
+    #[cfg(target_os = "linux")]
+    std::env::set_var("WINIT_UNIX_BACKEND", "x11");
+
     // Initialize logging
     env_logger::Builder::from_default_env()
         .filter_level(log::LevelFilter::Info)

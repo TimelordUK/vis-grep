@@ -3,26 +3,32 @@ use super::state::PreviewFilter;
 
 pub fn render_filter_input(ui: &mut egui::Ui, filter: &mut PreviewFilter) -> bool {
     let mut filter_changed = false;
-    
+
     if filter.active {
         ui.horizontal(|ui| {
             ui.label("Filter:");
-            
-            let response = ui.add(
-                TextEdit::singleline(&mut filter.query)
-                    .desired_width(200.0)
-                    .font(TextStyle::Monospace)
-            );
-            
+
+            let text_edit = TextEdit::singleline(&mut filter.query)
+                .desired_width(200.0)
+                .font(TextStyle::Monospace);
+
+            let response = ui.add(text_edit);
+
+            // Request focus if filter was just activated
+            if filter.request_focus {
+                response.request_focus();
+                filter.request_focus = false;
+            }
+
             if response.changed() {
                 filter.update_query(filter.query.clone());
                 filter_changed = true;
             }
-            
+
             if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 filter.deactivate();
             }
-            
+
             // Show match statistics
             if !filter.match_lines.is_empty() {
                 let (current, total) = filter.match_stats();
@@ -30,7 +36,7 @@ pub fn render_filter_input(ui: &mut egui::Ui, filter: &mut PreviewFilter) -> boo
             } else if !filter.query.is_empty() {
                 ui.label("No matches");
             }
-            
+
             // Show filter mode
             if filter.use_regex {
                 ui.label(RichText::new("regex").color(Color32::from_rgb(100, 150, 255)));
@@ -39,7 +45,7 @@ pub fn render_filter_input(ui: &mut egui::Ui, filter: &mut PreviewFilter) -> boo
             }
         });
     }
-    
+
     filter_changed
 }
 
@@ -68,14 +74,22 @@ pub fn render_filtered_line(
             );
         }
 
-        // Line number
-        ui.label(
-            RichText::new(format!("{:>4} ", line_number))
-                .color(Color32::from_gray(128))
-                .monospace()
+        // Line number - painted directly so it's not selectable
+        let line_num_text = format!("{:>4} ", line_number);
+        let font_id = egui::FontId::monospace(ui.text_style_height(&egui::TextStyle::Body));
+        let galley = ui.painter().layout_no_wrap(
+            line_num_text,
+            font_id,
+            Color32::from_gray(128),
         );
 
-        // Line content with match highlighting
+        let line_num_pos = ui.cursor().min;
+        ui.painter().galley(line_num_pos, galley.clone(), Color32::from_gray(128));
+
+        // Allocate space for the line number
+        ui.allocate_space(galley.size());
+
+        // Line content with match highlighting (selectable)
         if is_match && filter.active {
             render_highlighted_text(ui, line, filter);
         } else {

@@ -9,6 +9,7 @@ pub struct PreviewFilter {
     pub match_lines: Vec<usize>,
     pub current_match: Option<usize>,
     compiled_regex: Option<Regex>,
+    pub request_focus: bool,
 }
 
 impl PreviewFilter {
@@ -21,11 +22,13 @@ impl PreviewFilter {
             match_lines: Vec::new(),
             current_match: None,
             compiled_regex: None,
+            request_focus: false,
         }
     }
 
     pub fn activate(&mut self) {
         self.active = true;
+        self.request_focus = true;
     }
 
     pub fn deactivate(&mut self) {
@@ -34,6 +37,7 @@ impl PreviewFilter {
         self.match_lines.clear();
         self.current_match = None;
         self.compiled_regex = None;
+        self.request_focus = false;
     }
 
     pub fn update_query(&mut self, query: String) {
