@@ -39,6 +39,9 @@ pub struct TextViewerState {
     /// Flag to scroll to bottom on next frame
     pub scroll_to_bottom: bool,
 
+    /// Flag to scroll to current filter match on next frame
+    pub scroll_to_current_match: bool,
+
     /// Input handler for vim-style navigation
     pub input_handler: InputHandler,
 }
@@ -54,6 +57,7 @@ impl TextViewerState {
             goto_line_input: String::new(),
             goto_line_target: None,
             scroll_to_bottom: false,
+            scroll_to_current_match: false,
             input_handler: InputHandler::new(),
         }
     }
@@ -92,6 +96,12 @@ impl<'a> TextViewer<'a> {
                 &mut self.state.filter,
                 self.content
             );
+        }
+
+        // Check if we should scroll to current match (from n/N navigation)
+        if self.state.scroll_to_current_match {
+            scroll_to_match = true;
+            self.state.scroll_to_current_match = false;
         }
 
         // Handle goto line input
@@ -302,6 +312,7 @@ impl<'a> TextViewer<'a> {
                     } else {
                         state.filter.next_match();
                     }
+                    state.scroll_to_current_match = true;
                     handled = true;
                     return;
                 }
