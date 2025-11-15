@@ -67,9 +67,9 @@ EOF
         local nested_files=$((files_per_group / 2))
         for (( j=0; j<nested_files; j++ )); do
             local file_num=$((start_file + j))
+            local filename=$(get_log_filename $file_num)
             cat >> "$LAYOUT_FILE" << EOF
-${indent}        - path: "$(pwd)/$LOG_DIR/test_${file_num}.log"
-${indent}          name: "Test Log ${file_num}"
+${indent}        - path: "$(pwd)/$LOG_DIR/$filename"
 EOF
             # Create the log file
             create_log_file $file_num
@@ -83,9 +83,9 @@ EOF
         # Add remaining files to second nested group
         for (( j=nested_files; j<files_per_group; j++ )); do
             local file_num=$((start_file + j))
+            local filename=$(get_log_filename $file_num)
             cat >> "$LAYOUT_FILE" << EOF
-${indent}        - path: "$(pwd)/$LOG_DIR/test_${file_num}.log"
-${indent}          name: "Test Log ${file_num}"
+${indent}        - path: "$(pwd)/$LOG_DIR/$filename"
 EOF
             # Create the log file
             create_log_file $file_num
@@ -97,9 +97,9 @@ ${indent}  files:
 EOF
         for (( j=0; j<files_per_group; j++ )); do
             local file_num=$((start_file + j))
+            local filename=$(get_log_filename $file_num)
             cat >> "$LAYOUT_FILE" << EOF
-${indent}    - path: "$(pwd)/$LOG_DIR/test_${file_num}.log"
-${indent}      name: "Test Log ${file_num}"
+${indent}    - path: "$(pwd)/$LOG_DIR/$filename"
 EOF
             # Create the log file
             create_log_file $file_num
@@ -107,12 +107,42 @@ EOF
     fi
 }
 
+# Realistic log file names of varying lengths
+get_log_filename() {
+    local num=$1
+    local names=(
+        "API.log"
+        "BookingEngine.log"
+        "Extractor.log"
+        "PaymentProcessor.log"
+        "Auth.log"
+        "NotificationService.log"
+        "DB.log"
+        "Cache.log"
+        "MessageQueue.log"
+        "WebServer.log"
+        "BackgroundWorker.log"
+        "Scheduler.log"
+        "EmailService.log"
+        "FileUpload.log"
+        "ReportGenerator.log"
+        "Analytics.log"
+        "AuditLog.log"
+        "Session.log"
+        "SecurityMonitor.log"
+        "HealthCheck.log"
+    )
+    echo "${names[$((num % ${#names[@]}))]}"
+}
+
 # Function to create a log file with initial content
 create_log_file() {
     local num=$1
-    local file="$LOG_DIR/test_${num}.log"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting test log $num" > "$file"
+    local filename=$(get_log_filename $num)
+    local file="$LOG_DIR/$filename"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting $filename" > "$file"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Initial content for testing" >> "$file"
+    echo "$filename"  # Return the filename for use in YAML
 }
 
 # Calculate files per group
@@ -156,14 +186,15 @@ append_logs() {
     while true; do
         # Randomly select a few files to update
         local files_to_update=$((RANDOM % 3 + 1))
-        
+
         for (( i=0; i<files_to_update; i++ )); do
-            local file_num=$((RANDOM % NUM_FILES + 1))
-            local file="$LOG_DIR/test_${file_num}.log"
+            local file_num=$((RANDOM % NUM_FILES))
+            local filename=$(get_log_filename $file_num)
+            local file="$LOG_DIR/$filename"
             local level="${levels[$((RANDOM % ${#levels[@]}))]}"
             local msg="${messages[$((RANDOM % ${#messages[@]}))]}"
             local timestamp=$(date '+%Y-%m-%d %H:%M:%S.%3N')
-            
+
             echo "[$timestamp] [$level] $msg $((RANDOM % 1000))" >> "$file"
         done
         

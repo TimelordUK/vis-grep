@@ -131,7 +131,16 @@ impl VisGrepApp {
                 // Reduce spacing between items
                 ui.spacing_mut().item_spacing.y = 1.0;
                 ui.spacing_mut().button_padding.y = 1.0;
-                
+
+                // Calculate maximum filename width for alignment
+                let max_filename_len = self.tail_state.files.iter()
+                    .map(|f| f.display_name.len())
+                    .max()
+                    .unwrap_or(0);
+                // Approximate character width based on font size
+                let char_width = self.tail_state.font_size * 0.6;
+                self.tail_state.max_filename_width = (max_filename_len as f32 * char_width).max(100.0) + 20.0;
+
                 // Clone the group IDs to avoid borrow checker issues
                 let group_ids: Vec<String> = if let Some(layout) = &self.tail_state.layout {
                     layout.root_groups.iter().map(|g| g.id.clone()).collect()
@@ -370,38 +379,77 @@ impl VisGrepApp {
             };
             ui.colored_label(color, indicator);
 
-            // Filename (selectable) - scale width based on font size
+            // Filename (selectable) - use calculated max width for alignment
             let selected = self.tail_state.preview_selected_file == Some(file_idx);
-            let entry_width = 200.0 + (self.tail_state.font_size - 12.0) * 5.0; // Scale width with font
-            ui.allocate_ui_with_layout(
-                egui::Vec2::new(entry_width, self.tail_state.font_size + 4.0),
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    // Create selectable label and handle interaction
-                    let response = ui.selectable_label(selected, &file.display_name);
-                    
-                    if response.clicked() {
-                        self.tail_state.preview_selected_file = Some(file_idx);
-                        self.tail_state.preview_needs_reload = true;
-                        self.tail_state.preview_mode = PreviewMode::Following;
-                    }
-                    
-                    // Extract parent directory
-                    let parent_dir = file.path.parent()
-                        .and_then(|p| p.to_str())
-                        .unwrap_or("");
-                    
-                    // Show tooltip with full path and parent directory
-                    response.on_hover_text(format!(
-                        "Full path: {}\nDirectory: {}",
-                        file.path.display(),
-                        parent_dir
-                    ));
-                },
+            let entry_width = self.tail_state.max_filename_width;
+
+            // Extract parent directory for tooltip
+            let parent_dir = file.path.parent()
+                .and_then(|p| p.to_str())
+                .unwrap_or("");
+
+            // Use horizontal with fixed width and clip content
+            let (rect, response) = ui.allocate_exact_size(
+                egui::vec2(entry_width, self.tail_state.font_size + 4.0),
+                egui::Sense::click()
             );
 
-            // File size
-            ui.label(format!("{:.1} KB", file.last_size as f64 / 1024.0));
+            if ui.is_rect_visible(rect) {
+                // Save current clip rect
+                let old_clip_rect = ui.clip_rect();
+
+                // Clip to the allocated rect
+                ui.set_clip_rect(rect.intersect(old_clip_rect));
+
+                let visuals = ui.style().interact_selectable(&response, selected);
+
+                // Only draw background if selected or hovered, otherwise transparent
+                let bg_fill = if selected {
+                    visuals.bg_fill
+                } else if response.hovered() {
+                    visuals.bg_fill.linear_multiply(0.3) // Very faint on hover
+                } else {
+                    egui::Color32::TRANSPARENT // No background normally
+                };
+
+                ui.painter().rect(
+                    rect,
+                    visuals.rounding,
+                    bg_fill,
+                    visuals.bg_stroke,
+                );
+
+                let text_pos = rect.left_center() + egui::vec2(4.0, 0.0);
+                ui.painter().text(
+                    text_pos,
+                    egui::Align2::LEFT_CENTER,
+                    &file.display_name,
+                    egui::FontId::proportional(self.tail_state.font_size),
+                    visuals.text_color(),
+                );
+
+                // Restore original clip rect
+                ui.set_clip_rect(old_clip_rect);
+            }
+
+            if response.clicked() {
+                self.tail_state.preview_selected_file = Some(file_idx);
+                self.tail_state.preview_needs_reload = true;
+                self.tail_state.preview_mode = PreviewMode::Following;
+            }
+
+            // Show tooltip with full path and parent directory
+            response.on_hover_text(format!(
+                "Full path: {}\nDirectory: {}",
+                file.path.display(),
+                parent_dir
+            ));
+
+            // File size - fixed width to prevent jumping
+            ui.add_sized(
+                egui::vec2(60.0, 20.0),
+                egui::Label::new(format!("{:.1} KB", file.last_size as f64 / 1024.0))
+            );
 
             // Activity info - fixed width to prevent jumping
             let status_text = if file.is_active && file.lines_since_last_read > 0 {

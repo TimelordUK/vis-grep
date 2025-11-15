@@ -325,12 +325,13 @@ struct TailState {
     
     // Font settings
     font_size: f32,
-    
+
     // Tree layout
     layout: Option<TailLayout>,
-    
+
     // UI state
     control_panel_height: f32,
+    max_filename_width: f32,  // Cached maximum filename width for alignment
 }
 
 impl TailState {
@@ -360,6 +361,7 @@ impl TailState {
             font_size: 14.0,
             layout: None,
             control_panel_height: 250.0,
+            max_filename_width: 200.0,  // Initial default, will be recalculated
         }
     }
 

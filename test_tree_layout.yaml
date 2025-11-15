@@ -1,4 +1,4 @@
-name: "Test Tree Layout - 3 groups, 12 files"
+name: "Test Tree Layout - 2 groups, 10 files"
 version: 1
 settings:
   poll_interval_ms: 250
@@ -8,41 +8,18 @@ groups:
   - name: "Application Logs"
     icon: "📱"
     collapsed: false
-    groups:
-      - name: "Core Services"
-        files:
-          - path: "/home/me/dev/src/vis-grep/test_logs/test_1.log"
-            name: "Test Log 1"
-          - path: "/home/me/dev/src/vis-grep/test_logs/test_2.log"
-            name: "Test Log 2"
-      - name: "Background Jobs"
-        collapsed: true
-        files:
-          - path: "/home/me/dev/src/vis-grep/test_logs/test_3.log"
-            name: "Test Log 3"
-          - path: "/home/me/dev/src/vis-grep/test_logs/test_4.log"
-            name: "Test Log 4"
+    files:
+      - path: "/home/me/dev/vis-grep/test_logs/BookingEngine.log"
+      - path: "/home/me/dev/vis-grep/test_logs/Extractor.log"
+      - path: "/home/me/dev/vis-grep/test_logs/PaymentProcessor.log"
+      - path: "/home/me/dev/vis-grep/test_logs/Auth.log"
+      - path: "/home/me/dev/vis-grep/test_logs/NotificationService.log"
   - name: "System Logs"
     icon: "🖥️"
     collapsed: false
     files:
-      - path: "/home/me/dev/src/vis-grep/test_logs/test_5.log"
-        name: "Test Log 5"
-      - path: "/home/me/dev/src/vis-grep/test_logs/test_6.log"
-        name: "Test Log 6"
-      - path: "/home/me/dev/src/vis-grep/test_logs/test_7.log"
-        name: "Test Log 7"
-      - path: "/home/me/dev/src/vis-grep/test_logs/test_8.log"
-        name: "Test Log 8"
-  - name: "Service Logs"
-    icon: "⚙️"
-    collapsed: true
-    files:
-      - path: "/home/me/dev/src/vis-grep/test_logs/test_9.log"
-        name: "Test Log 9"
-      - path: "/home/me/dev/src/vis-grep/test_logs/test_10.log"
-        name: "Test Log 10"
-      - path: "/home/me/dev/src/vis-grep/test_logs/test_11.log"
-        name: "Test Log 11"
-      - path: "/home/me/dev/src/vis-grep/test_logs/test_12.log"
-        name: "Test Log 12"
+      - path: "/home/me/dev/vis-grep/test_logs/DB.log"
+      - path: "/home/me/dev/vis-grep/test_logs/Cache.log"
+      - path: "/home/me/dev/vis-grep/test_logs/MessageQueue.log"
+      - path: "/home/me/dev/vis-grep/test_logs/WebServer.log"
+      - path: "/home/me/dev/vis-grep/test_logs/BackgroundWorker.log"
