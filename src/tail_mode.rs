@@ -867,6 +867,36 @@ impl VisGrepApp {
                     );
                 }
 
+                // Goto line input UI
+                if self.tail_state.goto_line_active {
+                    ui.horizontal(|ui| {
+                        ui.label("Go to line:");
+
+                        let response = ui.add(
+                            egui::TextEdit::singleline(&mut self.tail_state.goto_line_input)
+                                .desired_width(100.0)
+                        );
+
+                        // Auto-focus the input
+                        response.request_focus();
+
+                        // Handle Enter key
+                        if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            if let Ok(line_num) = self.tail_state.goto_line_input.parse::<usize>() {
+                                if line_num > 0 && line_num <= self.tail_state.preview_content.len() {
+                                    self.tail_state.goto_line_target = Some(line_num - 1); // Convert to 0-indexed
+                                    self.tail_state.preview_mode = PreviewMode::Paused;
+                                }
+                            }
+                            self.tail_state.goto_line_active = false;
+                            self.tail_state.goto_line_input.clear();
+                        }
+
+                        // Show total lines
+                        ui.label(format!("/ {}", self.tail_state.preview_content.len()));
+                    });
+                }
+
                 // Content area
                 // Content area - use all available space
                 let scroll_area = if self.tail_state.preview_mode == PreviewMode::Following {
@@ -916,6 +946,23 @@ impl VisGrepApp {
                                         ),
                                         Some(egui::Align::Center)
                                     );
+                                }
+
+                                // If we should scroll to goto line target, make it visible
+                                if let Some(target_line) = self.tail_state.goto_line_target {
+                                    if line_idx == target_line {
+                                        let line_height = self.tail_state.font_size + 4.0;
+                                        let target_y = line_idx as f32 * line_height;
+                                        ui.scroll_to_rect(
+                                            egui::Rect::from_min_size(
+                                                egui::pos2(0.0, target_y),
+                                                egui::vec2(100.0, line_height)
+                                            ),
+                                            Some(egui::Align::Center)
+                                        );
+                                        // Clear the target after scrolling
+                                        self.tail_state.goto_line_target = None;
+                                    }
                                 }
 
                                 let color_scheme = self.config.log_format.get_color_scheme();
@@ -1038,11 +1085,25 @@ impl VisGrepApp {
                     self.tail_state.preview_filter.activate();
                 }
                 
-                // Escape - deactivate filter
-                if i.key_pressed(egui::Key::Escape) && self.tail_state.preview_filter.active {
-                    self.tail_state.preview_filter.deactivate();
+                // Escape - deactivate filter or goto line mode
+                if i.key_pressed(egui::Key::Escape) {
+                    if self.tail_state.preview_filter.active {
+                        self.tail_state.preview_filter.deactivate();
+                    } else if self.tail_state.goto_line_active {
+                        self.tail_state.goto_line_active = false;
+                        self.tail_state.goto_line_input.clear();
+                        self.tail_state.goto_line_target = None;
+                    }
                 }
-                
+
+                // : - activate goto line mode
+                if !self.tail_state.preview_filter.active && !self.tail_state.goto_line_active {
+                    if i.events.iter().any(|e| matches!(e, egui::Event::Text(s) if s == ":")) {
+                        self.tail_state.goto_line_active = true;
+                        self.tail_state.goto_line_input.clear();
+                    }
+                }
+
                 // n - next match
                 if i.key_pressed(egui::Key::N) && !i.modifiers.shift && self.tail_state.preview_filter.active {
                     self.tail_state.preview_filter.next_match();

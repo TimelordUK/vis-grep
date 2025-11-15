@@ -332,6 +332,11 @@ struct TailState {
     // UI state
     control_panel_height: f32,
     max_filename_width: f32,  // Cached maximum filename width for alignment
+
+    // Goto line mode
+    goto_line_active: bool,
+    goto_line_input: String,
+    goto_line_target: Option<usize>,
 }
 
 impl TailState {
@@ -362,6 +367,9 @@ impl TailState {
             layout: None,
             control_panel_height: 250.0,
             max_filename_width: 200.0,  // Initial default, will be recalculated
+            goto_line_active: false,
+            goto_line_input: String::new(),
+            goto_line_target: None,
         }
     }
 
