@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use crate::theme::Theme;
-use crate::log_parser::LogColorScheme;
+use crate::log_parser::{LogColorScheme, LogColorPreset};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FolderPreset {
@@ -35,16 +35,30 @@ pub struct LogFormatConfig {
     #[serde(default)]
     pub custom_patterns: Vec<(String, String)>,
 
-    /// Color scheme for log levels
+    /// Color preset: Vibrant (default, colorful), Subtle (muted), or Monochrome (gray with red errors)
     #[serde(default)]
-    pub colors: LogColorScheme,
+    pub color_preset: LogColorPreset,
+
+    /// Color scheme for log levels (auto-set from preset, but can be customized)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_colors: Option<LogColorScheme>,
+}
+
+impl LogFormatConfig {
+    /// Get the effective color scheme (custom colors or preset)
+    pub fn get_color_scheme(&self) -> LogColorScheme {
+        self.custom_colors
+            .clone()
+            .unwrap_or_else(|| LogColorScheme::from_preset(self.color_preset))
+    }
 }
 
 impl Default for LogFormatConfig {
     fn default() -> Self {
         Self {
             custom_patterns: vec![],
-            colors: LogColorScheme::default(),
+            color_preset: LogColorPreset::Vibrant,
+            custom_colors: None,
         }
     }
 }

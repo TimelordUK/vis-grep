@@ -2,6 +2,19 @@ use eframe::egui::Color32;
 use serde::{Deserialize, Serialize};
 use super::LogLevel;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LogColorPreset {
+    Vibrant,
+    Subtle,
+    Monochrome,
+}
+
+impl Default for LogColorPreset {
+    fn default() -> Self {
+        Self::Vibrant
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogColorScheme {
     pub trace: String,
@@ -13,8 +26,9 @@ pub struct LogColorScheme {
     pub unknown: String,
 }
 
-impl Default for LogColorScheme {
-    fn default() -> Self {
+impl LogColorScheme {
+    /// Vibrant color scheme (default) - high contrast, colorful
+    pub fn vibrant() -> Self {
         Self {
             trace: "#6B7280".to_string(),      // Dim gray
             debug: "#60A5FA".to_string(),      // Light blue
@@ -24,6 +38,47 @@ impl Default for LogColorScheme {
             fatal: "#DC2626".to_string(),      // Bright red
             unknown: "#9CA3AF".to_string(),    // Medium gray
         }
+    }
+
+    /// Subtle color scheme - muted colors, less distracting
+    pub fn subtle() -> Self {
+        Self {
+            trace: "#6B7280".to_string(),      // Dim gray
+            debug: "#93C5FD".to_string(),      // Softer blue
+            info: "#D1D5DB".to_string(),       // Light gray (default text)
+            warn: "#FCD34D".to_string(),       // Softer yellow
+            error: "#F87171".to_string(),      // Softer red
+            fatal: "#EF4444".to_string(),      // Medium red
+            unknown: "#9CA3AF".to_string(),    // Medium gray
+        }
+    }
+
+    /// Monochrome scheme - shades of gray with red for errors only
+    pub fn monochrome() -> Self {
+        Self {
+            trace: "#4B5563".to_string(),      // Dark gray
+            debug: "#6B7280".to_string(),      // Medium-dark gray
+            info: "#D1D5DB".to_string(),       // Light gray (default text)
+            warn: "#9CA3AF".to_string(),       // Medium gray
+            error: "#EF4444".to_string(),      // Red (only color)
+            fatal: "#DC2626".to_string(),      // Bright red
+            unknown: "#9CA3AF".to_string(),    // Medium gray
+        }
+    }
+
+    /// Create from preset
+    pub fn from_preset(preset: LogColorPreset) -> Self {
+        match preset {
+            LogColorPreset::Vibrant => Self::vibrant(),
+            LogColorPreset::Subtle => Self::subtle(),
+            LogColorPreset::Monochrome => Self::monochrome(),
+        }
+    }
+}
+
+impl Default for LogColorScheme {
+    fn default() -> Self {
+        Self::vibrant()
     }
 }
 

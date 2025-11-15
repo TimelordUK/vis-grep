@@ -801,6 +801,7 @@ impl VisGrepApp {
                                 let is_match = filter.match_lines.contains(&line_idx);
                                 let is_current = filter.current_match_line() == Some(line_idx);
                                 
+                                let color_scheme = self.config.log_format.get_color_scheme();
                                 filter::preview::render_filtered_line(
                                     ui,
                                     line,
@@ -809,7 +810,7 @@ impl VisGrepApp {
                                     is_current,
                                     filter,
                                     &self.log_detector,
-                                    &self.config.log_format.colors,
+                                    &color_scheme,
                                 );
                             }
                         }
