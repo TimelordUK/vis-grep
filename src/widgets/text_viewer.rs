@@ -107,44 +107,53 @@ impl<'a> TextViewer<'a> {
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
         };
 
-        let scroll_output = scroll_area.show(ui, |ui| {
-            if self.content.is_empty() {
-                ui.label(
-                    egui::RichText::new("No content to display")
-                        .italics()
-                        .color(egui::Color32::GRAY),
-                );
-            } else {
-                for (line_idx, line) in self.content.iter().enumerate() {
-                    let is_match = self.state.filter.match_lines.contains(&line_idx);
-                    let is_current = self.state.filter.current_match_line() == Some(line_idx);
+        let scroll_output = scroll_area
+            .id_salt("text_viewer_scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
 
-                    let response = filter::preview::render_filtered_line(
-                        ui,
-                        line,
-                        line_idx + 1,
-                        is_match,
-                        is_current,
-                        &self.state.filter,
-                        self.log_detector,
-                        self.color_scheme,
+                // Apply custom font size
+                let font_id = egui::FontId::new(self.state.font_size, egui::FontFamily::Monospace);
+                ui.style_mut().text_styles.insert(egui::TextStyle::Monospace, font_id);
+
+                if self.content.is_empty() {
+                    ui.label(
+                        egui::RichText::new("No content to display")
+                            .italics()
+                            .color(egui::Color32::GRAY),
                     );
+                } else {
+                    for (line_idx, line) in self.content.iter().enumerate() {
+                        let is_match = self.state.filter.match_lines.contains(&line_idx);
+                        let is_current = self.state.filter.current_match_line() == Some(line_idx);
 
-                    // If we should scroll to this match, make it visible using actual rect
-                    if scroll_to_match && is_current {
-                        ui.scroll_to_rect(response.rect, Some(egui::Align::Center));
-                    }
+                        let response = filter::preview::render_filtered_line(
+                            ui,
+                            line,
+                            line_idx + 1,
+                            is_match,
+                            is_current,
+                            &self.state.filter,
+                            self.log_detector,
+                            self.color_scheme,
+                        );
 
-                    // If we should scroll to goto line target, make it visible using actual rect
-                    if let Some(target_line) = goto_target {
-                        if line_idx == target_line {
-                            info!("Scrolling to line_idx: {}, target_line: {}, rect: {:?}", line_idx, target_line, response.rect);
+                        // If we should scroll to this match, make it visible using actual rect
+                        if scroll_to_match && is_current {
                             ui.scroll_to_rect(response.rect, Some(egui::Align::Center));
+                        }
+
+                        // If we should scroll to goto line target, make it visible using actual rect
+                        if let Some(target_line) = goto_target {
+                            if line_idx == target_line {
+                                info!("Scrolling to line_idx: {}, target_line: {}, rect: {:?}", line_idx, target_line, response.rect);
+                                ui.scroll_to_rect(response.rect, Some(egui::Align::Center));
+                            }
                         }
                     }
                 }
-            }
-        });
+            });
 
         // Clear goto target after scroll area completes
         if goto_target.is_some() {
