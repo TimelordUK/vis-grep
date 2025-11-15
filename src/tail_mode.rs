@@ -345,6 +345,11 @@ impl VisGrepApp {
         ) {
             return;
         }
+        
+        // Capture the file path before the closure to avoid borrowing issues
+        let file_path = file.path.clone();
+        let mut open_in_editor_clicked = false;
+        
         // Scale indent based on font size
         let indent = depth as f32 * (self.tail_state.font_size * 1.0);
         
@@ -437,7 +442,17 @@ impl VisGrepApp {
                     Err(e) => log::error!("Failed to access clipboard: {}", e),
                 }
             }
+            
+            // Open in editor button
+            if ui.small_button("📝").on_hover_text("Open in editor").clicked() {
+                open_in_editor_clicked = true;
+            }
         });
+        
+        // Handle open in editor outside closure to avoid borrowing issues
+        if open_in_editor_clicked {
+            self.open_file_in_editor(&file_path);
+        }
         
         // Add minimal spacing between rows
         ui.add_space(1.0);
