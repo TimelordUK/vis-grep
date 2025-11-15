@@ -1,5 +1,6 @@
 use eframe::egui;
 use log::info;
+use std::collections::HashMap;
 use crate::filter;
 use crate::log_parser::{LogLevelDetector, LogColorScheme};
 use crate::input_handler::{InputHandler, NavigationCommand};
@@ -42,6 +43,9 @@ pub struct TextViewerState {
     /// Flag to scroll to current filter match on next frame
     pub scroll_to_current_match: bool,
 
+    /// Bookmarks/marks (vim-style ma, 'a) - maps mark character to line number (0-indexed)
+    pub marks: HashMap<char, usize>,
+
     /// Input handler for vim-style navigation
     pub input_handler: InputHandler,
 }
@@ -58,6 +62,7 @@ impl TextViewerState {
             goto_line_target: None,
             scroll_to_bottom: false,
             scroll_to_current_match: false,
+            marks: HashMap::new(),
             input_handler: InputHandler::new(),
         }
     }
@@ -211,7 +216,7 @@ impl<'a> TextViewer<'a> {
         ui.separator();
         ui.horizontal(|ui| {
             ui.label(
-                egui::RichText::new("j/k: scroll  gg/G: jump  /: filter  n/N: next/prev match  :: goto line")
+                egui::RichText::new("j/k: scroll  gg/G: jump  /: filter  n/N: next/prev match  :: goto line  ma/'a: mark/goto")
                     .color(egui::Color32::GRAY)
                     .small(),
             );
@@ -360,6 +365,27 @@ impl<'a> TextViewer<'a> {
                         if state.filter.active {
                             state.filter.prev_match();
                             handled = true;
+                        }
+                    }
+                    NavigationCommand::SetMark(mark_char) => {
+                        // ma, mb, etc - set a mark at current scroll position
+                        // We need to calculate which line is currently at the top of the viewport
+                        // For simplicity, we'll use scroll_offset / line_height to estimate
+                        let line_height = state.font_size + 4.0;
+                        let estimated_line = (state.scroll_offset / line_height) as usize;
+                        state.marks.insert(mark_char, estimated_line);
+                        info!("Set mark '{}' at line {}", mark_char, estimated_line);
+                        handled = true;
+                    }
+                    NavigationCommand::GotoMark(mark_char) => {
+                        // 'a, 'b, etc - go to a mark
+                        if let Some(&line_num) = state.marks.get(&mark_char) {
+                            info!("Going to mark '{}' at line {}", mark_char, line_num);
+                            state.goto_line_target = Some(line_num);
+                            state.view_mode = ViewMode::Paused;
+                            handled = true;
+                        } else {
+                            info!("Mark '{}' not set", mark_char);
                         }
                     }
                     _ => {
