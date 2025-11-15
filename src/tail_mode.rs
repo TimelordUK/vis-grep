@@ -931,13 +931,21 @@ impl VisGrepApp {
                     });
                 }
 
-                // Check if we have a goto line target
+                // Capture goto target for use inside scroll area
                 let goto_target = self.tail_state.goto_line_target;
+                if let Some(target) = goto_target {
+                    info!("Preview mode: {:?}, goto_target: {}", self.tail_state.preview_mode, target);
+                }
 
                 // Content area - use all available space
+                // When we have a goto_line_target, don't set scroll_offset - let scroll_to_rect handle it
                 let scroll_area = if self.tail_state.preview_mode == PreviewMode::Following {
                     egui::ScrollArea::both()
                         .stick_to_bottom(true)
+                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                } else if goto_target.is_some() {
+                    // Don't set scroll_offset when goto is active - let scroll_to_rect work
+                    egui::ScrollArea::both()
                         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
                 } else {
                     egui::ScrollArea::both()
