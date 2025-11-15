@@ -1029,8 +1029,13 @@ impl VisGrepApp {
                 if self.tail_state.preview_mode == PreviewMode::Following {
                     // In Following mode, we don't track manual scrolls
                 } else {
-                    // Update scroll offset
-                    self.tail_state.preview_scroll_offset = scroll_output.state.offset.y;
+                    // Update scroll offset - but skip this if we just did a goto
+                    // (let the scroll_to_rect take effect first)
+                    if goto_target.is_none() {
+                        self.tail_state.preview_scroll_offset = scroll_output.state.offset.y;
+                    } else {
+                        info!("Skipping scroll offset update during goto, current offset: {}", scroll_output.state.offset.y);
+                    }
                 }
 
                 // Footer
