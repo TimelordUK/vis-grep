@@ -75,18 +75,18 @@ impl<'a> TextViewer<'a> {
 
     /// Render the text viewer widget
     pub fn show(mut self, ui: &mut egui::Ui) {
-        // Handle filter input
-        filter::preview::render_filter_input(ui, &mut self.state.filter);
+        // Handle filter input and update matches if filter changed
+        let mut scroll_to_match = false;
+        if filter::preview::render_filter_input(ui, &mut self.state.filter) {
+            // Filter changed, update matches
+            scroll_to_match = filter::preview::update_filter_matches(
+                &mut self.state.filter,
+                self.content
+            );
+        }
 
         // Handle goto line input
         self.render_goto_line_input(ui);
-
-        // Determine if we should scroll to a search match
-        let scroll_to_match = if let Some(_) = self.state.filter.current_match {
-            true
-        } else {
-            false
-        };
 
         // Capture goto target for use inside scroll area
         let goto_target = self.state.goto_line_target;

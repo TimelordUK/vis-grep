@@ -895,15 +895,7 @@ impl VisGrepApp {
                 self.tail_state.text_viewer_state.filter = self.tail_state.preview_filter.clone();
                 self.tail_state.text_viewer_state.font_size = self.tail_state.font_size;
 
-                // Update filter matches if filter changed
-                if filter::preview::render_filter_input(ui, &mut self.tail_state.text_viewer_state.filter) {
-                    filter::preview::update_filter_matches(
-                        &mut self.tail_state.text_viewer_state.filter,
-                        &self.tail_state.preview_content
-                    );
-                }
-
-                // Render the text viewer widget
+                // Render the text viewer widget (it handles filter UI internally)
                 let color_scheme = self.config.log_format.get_color_scheme();
                 let viewer = widgets::TextViewer::new(
                     &mut self.tail_state.text_viewer_state,
