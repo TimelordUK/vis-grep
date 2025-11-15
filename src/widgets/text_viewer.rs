@@ -46,6 +46,9 @@ pub struct TextViewerState {
     /// Bookmarks/marks (vim-style ma, 'a) - maps mark character to line number (0-indexed)
     pub marks: HashMap<char, usize>,
 
+    /// Track the last line we explicitly navigated to (for mark setting)
+    pub last_navigated_line: Option<usize>,
+
     /// Input handler for vim-style navigation
     pub input_handler: InputHandler,
 }
@@ -63,6 +66,7 @@ impl TextViewerState {
             scroll_to_bottom: false,
             scroll_to_current_match: false,
             marks: HashMap::new(),
+            last_navigated_line: None,
             input_handler: InputHandler::new(),
         }
     }
@@ -263,6 +267,7 @@ impl<'a> TextViewer<'a> {
                             let target = line_num - 1; // Convert to 0-indexed
                             info!("Goto line: user entered {}, setting target to {}", line_num, target);
                             self.state.goto_line_target = Some(target);
+                            self.state.last_navigated_line = Some(target);
                             self.state.view_mode = ViewMode::Paused;
                         }
                     }
@@ -368,13 +373,17 @@ impl<'a> TextViewer<'a> {
                         }
                     }
                     NavigationCommand::SetMark(mark_char) => {
-                        // ma, mb, etc - set a mark at current scroll position
-                        // We need to calculate which line is currently at the top of the viewport
-                        // For simplicity, we'll use scroll_offset / line_height to estimate
-                        let line_height = state.font_size + 4.0;
-                        let estimated_line = (state.scroll_offset / line_height) as usize;
-                        state.marks.insert(mark_char, estimated_line);
-                        info!("Set mark '{}' at line {}", mark_char, estimated_line);
+                        // ma, mb, etc - set a mark at current line
+                        // Prefer last_navigated_line if set (from :goto or 'mark navigation)
+                        // Otherwise estimate from scroll_offset
+                        let mark_line = if let Some(line) = state.last_navigated_line {
+                            line
+                        } else {
+                            let line_height = state.font_size + 4.0;
+                            (state.scroll_offset / line_height) as usize
+                        };
+                        state.marks.insert(mark_char, mark_line);
+                        info!("Set mark '{}' at line {} (1-indexed: {})", mark_char, mark_line, mark_line + 1);
                         handled = true;
                     }
                     NavigationCommand::GotoMark(mark_char) => {
@@ -382,6 +391,7 @@ impl<'a> TextViewer<'a> {
                         if let Some(&line_num) = state.marks.get(&mark_char) {
                             info!("Going to mark '{}' at line {}", mark_char, line_num);
                             state.goto_line_target = Some(line_num);
+                            state.last_navigated_line = Some(line_num);
                             state.view_mode = ViewMode::Paused;
                             handled = true;
                         } else {
