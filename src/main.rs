@@ -194,7 +194,10 @@ struct TailedFile {
     // Statistics
     total_lines_read: usize,
     total_bytes_read: u64,
-    
+
+    // Log level tracking for recent activity
+    level_counts_since_last_read: HashMap<log_parser::LogLevel, usize>,
+
     // Group membership
     group_id: Option<String>,
 }
@@ -230,6 +233,7 @@ impl TailedFile {
             throttle_state: ThrottleState::Normal,
             total_lines_read: 0,
             total_bytes_read: 0,
+            level_counts_since_last_read: HashMap::new(),
             group_id: None,
         })
     }
@@ -589,7 +593,10 @@ impl VisGrepApp {
                         file.is_active = true;
                         file.last_activity = now;
                         file.lines_since_last_read = new_lines.len();
-                        
+
+                        // Clear and recalculate level counts for recent activity
+                        file.level_counts_since_last_read.clear();
+
                         // Store activity change to propagate later
                         if !was_active {
                             if let Some(group_id) = &file.group_id {
@@ -598,12 +605,12 @@ impl VisGrepApp {
                         }
 
                         // Add lines to output buffer
-                        for line in new_lines {
+                        for line in &new_lines {
                             let log_line = LogLine {
                                 timestamp: now,
                                 source_file: file.display_name.clone(),
                                 line_number: file.total_lines_read,
-                                content: line,
+                                content: line.clone(),
                             };
 
                             self.tail_state.output_buffer.push_back(log_line);
