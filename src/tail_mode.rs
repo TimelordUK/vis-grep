@@ -1,4 +1,4 @@
-use crate::{PreviewMode, VisGrepApp, get_color_for_file, filter, log_parser};
+use crate::{PreviewMode, VisGrepApp, get_color_for_file, filter, log_parser, widgets};
 use eframe::egui;
 use log::info;
 
@@ -886,172 +886,40 @@ impl VisGrepApp {
 
                 ui.separator();
 
-                // Filter input UI
-                let mut scroll_to_match = false;
-                if filter::preview::render_filter_input(ui, &mut self.tail_state.preview_filter) {
-                    // Filter changed, update matches
-                    scroll_to_match = filter::preview::update_filter_matches(
-                        &mut self.tail_state.preview_filter,
+                // Sync TextViewerState with TailState before rendering
+                self.tail_state.text_viewer_state.view_mode = match self.tail_state.preview_mode {
+                    PreviewMode::Following => widgets::ViewMode::Following,
+                    PreviewMode::Paused => widgets::ViewMode::Paused,
+                };
+                self.tail_state.text_viewer_state.scroll_offset = self.tail_state.preview_scroll_offset;
+                self.tail_state.text_viewer_state.filter = self.tail_state.preview_filter.clone();
+                self.tail_state.text_viewer_state.font_size = self.tail_state.font_size;
+
+                // Update filter matches if filter changed
+                if filter::preview::render_filter_input(ui, &mut self.tail_state.text_viewer_state.filter) {
+                    filter::preview::update_filter_matches(
+                        &mut self.tail_state.text_viewer_state.filter,
                         &self.tail_state.preview_content
                     );
                 }
 
-                // Goto line input UI
-                if self.tail_state.goto_line_active {
-                    ui.horizontal(|ui| {
-                        ui.label("Go to line:");
+                // Render the text viewer widget
+                let color_scheme = self.config.log_format.get_color_scheme();
+                let viewer = widgets::TextViewer::new(
+                    &mut self.tail_state.text_viewer_state,
+                    &self.tail_state.preview_content,
+                    &self.log_detector,
+                    &color_scheme,
+                );
+                viewer.show(ui);
 
-                        let response = ui.add(
-                            egui::TextEdit::singleline(&mut self.tail_state.goto_line_input)
-                                .desired_width(100.0)
-                        );
-
-                        // Auto-focus the input
-                        response.request_focus();
-
-                        // Check for Enter key press
-                        let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
-
-                        // Handle Enter key or lost focus with Enter
-                        if (response.lost_focus() && enter_pressed) || enter_pressed {
-                            if let Ok(line_num) = self.tail_state.goto_line_input.parse::<usize>() {
-                                if line_num > 0 && line_num <= self.tail_state.preview_content.len() {
-                                    let target = line_num - 1; // Convert to 0-indexed
-                                    info!("Goto line: user entered {}, setting target to {}", line_num, target);
-                                    self.tail_state.goto_line_target = Some(target);
-                                    self.tail_state.preview_mode = PreviewMode::Paused;
-                                }
-                            }
-                            self.tail_state.goto_line_active = false;
-                            self.tail_state.goto_line_input.clear();
-                        }
-
-                        // Show total lines
-                        ui.label(format!("/ {}", self.tail_state.preview_content.len()));
-                    });
-                }
-
-                // Capture goto target for use inside scroll area
-                let goto_target = self.tail_state.goto_line_target;
-                if let Some(target) = goto_target {
-                    info!("Preview mode: {:?}, goto_target: {}", self.tail_state.preview_mode, target);
-                }
-
-                // Content area - use all available space
-                // When we have a goto_line_target, don't set scroll_offset - let scroll_to_rect handle it
-                let scroll_area = if self.tail_state.preview_mode == PreviewMode::Following {
-                    egui::ScrollArea::both()
-                        .stick_to_bottom(true)
-                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
-                } else if goto_target.is_some() {
-                    // Don't set scroll_offset when goto is active - let scroll_to_rect work
-                    egui::ScrollArea::both()
-                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
-                } else {
-                    egui::ScrollArea::both()
-                        .scroll_offset(egui::Vec2::new(0.0, self.tail_state.preview_scroll_offset))
-                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                // Sync back to TailState
+                self.tail_state.preview_mode = match self.tail_state.text_viewer_state.view_mode {
+                    widgets::ViewMode::Following => PreviewMode::Following,
+                    widgets::ViewMode::Paused => PreviewMode::Paused,
                 };
-
-                let scroll_output = scroll_area
-                    .id_salt("tail_preview_scroll")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
-
-                        // Apply custom font size
-                        let font_id = egui::FontId::new(self.tail_state.font_size, egui::FontFamily::Monospace);
-                        ui.style_mut().text_styles.insert(egui::TextStyle::Monospace, font_id);
-
-                        // Display preview content
-                        if self.tail_state.preview_content.is_empty() {
-                            ui.label(
-                                egui::RichText::new("Loading...")
-                                    .italics()
-                                    .color(egui::Color32::GRAY),
-                            );
-                        } else {
-                            let filter = &self.tail_state.preview_filter;
-
-                            for (line_idx, line) in
-                                self.tail_state.preview_content.iter().enumerate()
-                            {
-                                let is_match = filter.match_lines.contains(&line_idx);
-                                let is_current = filter.current_match_line() == Some(line_idx);
-
-                                let color_scheme = self.config.log_format.get_color_scheme();
-                                let response = filter::preview::render_filtered_line(
-                                    ui,
-                                    line,
-                                    line_idx + 1,
-                                    is_match,
-                                    is_current,
-                                    filter,
-                                    &self.log_detector,
-                                    &color_scheme,
-                                );
-
-                                // If we should scroll to this match, make it visible using actual rect
-                                if scroll_to_match && is_current {
-                                    ui.scroll_to_rect(response.rect, Some(egui::Align::Center));
-                                }
-
-                                // If we should scroll to goto line target, make it visible using actual rect
-                                if let Some(target_line) = goto_target {
-                                    if line_idx == target_line {
-                                        info!("Scrolling to line_idx: {}, target_line: {}, rect: {:?}", line_idx, target_line, response.rect);
-                                        ui.scroll_to_rect(response.rect, Some(egui::Align::Center));
-                                    }
-                                }
-                            }
-                        }
-                    });
-
-                // Clear goto target after scroll area completes
-                if goto_target.is_some() {
-                    info!("Clearing goto_line_target after scroll area");
-                    self.tail_state.goto_line_target = None;
-                }
-
-                // Detect manual scroll (switch to Paused mode)
-                if self.tail_state.preview_mode == PreviewMode::Following {
-                    // In Following mode, we don't track manual scrolls
-                } else {
-                    // Update scroll offset - but skip this if we just did a goto
-                    // (let the scroll_to_rect take effect first)
-                    if goto_target.is_none() {
-                        self.tail_state.preview_scroll_offset = scroll_output.state.offset.y;
-                    } else {
-                        info!("After goto, scroll offset is now: {}", scroll_output.state.offset.y);
-                        // Save the new offset for next frame
-                        self.tail_state.preview_scroll_offset = scroll_output.state.offset.y;
-                    }
-                }
-
-                // Footer
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("j/k: scroll  gg/G: jump  /: filter  n/N: next/prev match")
-                            .color(egui::Color32::GRAY)
-                            .small(),
-                    );
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if self.tail_state.preview_mode == PreviewMode::Following {
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "> Following - showing last {} lines",
-                                    self.tail_state.preview_follow_lines
-                                ))
-                                .color(egui::Color32::from_rgb(100, 255, 100)),
-                            );
-                        } else {
-                            let total_lines = self.tail_state.preview_content.len();
-                            ui.label(format!("Total lines: {}", total_lines));
-                        }
-                    });
-                });
+                self.tail_state.preview_scroll_offset = self.tail_state.text_viewer_state.scroll_offset;
+                self.tail_state.preview_filter = self.tail_state.text_viewer_state.filter.clone();
                 
                 // Handle editor opening outside of closures
                 if open_editor {
@@ -1129,18 +997,18 @@ impl VisGrepApp {
                 if i.key_pressed(egui::Key::Escape) {
                     if self.tail_state.preview_filter.active {
                         self.tail_state.preview_filter.deactivate();
-                    } else if self.tail_state.goto_line_active {
-                        self.tail_state.goto_line_active = false;
-                        self.tail_state.goto_line_input.clear();
-                        self.tail_state.goto_line_target = None;
+                    } else if self.tail_state.text_viewer_state.goto_line_active {
+                        self.tail_state.text_viewer_state.goto_line_active = false;
+                        self.tail_state.text_viewer_state.goto_line_input.clear();
+                        self.tail_state.text_viewer_state.goto_line_target = None;
                     }
                 }
 
                 // : - activate goto line mode
-                if !self.tail_state.preview_filter.active && !self.tail_state.goto_line_active {
+                if !self.tail_state.preview_filter.active && !self.tail_state.text_viewer_state.goto_line_active {
                     if i.events.iter().any(|e| matches!(e, egui::Event::Text(s) if s == ":")) {
-                        self.tail_state.goto_line_active = true;
-                        self.tail_state.goto_line_input.clear();
+                        self.tail_state.text_viewer_state.goto_line_active = true;
+                        self.tail_state.text_viewer_state.goto_line_input.clear();
                     }
                 }
 

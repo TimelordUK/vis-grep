@@ -17,6 +17,7 @@ mod tail_layout;
 mod theme;
 mod filter;
 mod log_parser;
+mod widgets;
 
 use config::Config;
 use input_handler::{InputHandler, NavigationCommand};
@@ -326,7 +327,10 @@ struct TailState {
     preview_follow_lines: usize,
     preview_content: Vec<String>,
     preview_needs_reload: bool,
-    
+
+    // Text viewer state (encapsulates preview display, navigation, filtering, goto)
+    text_viewer_state: widgets::TextViewerState,
+
     // Font settings
     font_size: f32,
 
@@ -336,11 +340,6 @@ struct TailState {
     // UI state
     control_panel_height: f32,
     max_filename_width: f32,  // Cached maximum filename width for alignment
-
-    // Goto line mode
-    goto_line_active: bool,
-    goto_line_input: String,
-    goto_line_target: Option<usize>,
 }
 
 impl TailState {
@@ -367,13 +366,11 @@ impl TailState {
             preview_follow_lines: 1000,
             preview_content: Vec::new(),
             preview_needs_reload: false,
+            text_viewer_state: widgets::TextViewerState::new(config.ui.font_size),
             font_size: config.ui.font_size,
             layout: None,
             control_panel_height: 250.0,
             max_filename_width: 200.0,  // Initial default, will be recalculated
-            goto_line_active: false,
-            goto_line_input: String::new(),
-            goto_line_target: None,
         }
     }
 
