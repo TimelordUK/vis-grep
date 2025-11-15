@@ -64,6 +64,34 @@ impl Default for LogFormatConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiPreferences {
+    /// Default font size for UI elements
+    #[serde(default = "default_font_size")]
+    pub font_size: f32,
+
+    /// Tail mode file polling interval in milliseconds
+    #[serde(default = "default_poll_interval")]
+    pub poll_interval_ms: u64,
+}
+
+fn default_font_size() -> f32 {
+    14.0
+}
+
+fn default_poll_interval() -> u64 {
+    250
+}
+
+impl Default for UiPreferences {
+    fn default() -> Self {
+        Self {
+            font_size: default_font_size(),
+            poll_interval_ms: default_poll_interval(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub folder_presets: Vec<FolderPreset>,
     #[serde(default)]
@@ -74,6 +102,8 @@ pub struct Config {
     pub editor: Option<EditorConfig>,
     #[serde(default)]
     pub log_format: LogFormatConfig,
+    #[serde(default)]
+    pub ui: UiPreferences,
 }
 
 impl Default for Config {
@@ -93,6 +123,7 @@ impl Default for Config {
             theme: Theme::default(),
             editor: None,
             log_format: LogFormatConfig::default(),
+            ui: UiPreferences::default(),
         }
     }
 }
@@ -224,6 +255,7 @@ impl Config {
                 args: vec![],
             }),
             log_format: LogFormatConfig::default(),
+            ui: UiPreferences::default(),
         };
 
         example.save()

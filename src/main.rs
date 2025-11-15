@@ -120,7 +120,7 @@ struct GrepState {
 }
 
 impl GrepState {
-    fn new() -> Self {
+    fn new(config: &Config) -> Self {
         Self {
             search_path: VisGrepApp::expand_tilde(
                 std::env::current_dir()
@@ -146,7 +146,7 @@ impl GrepState {
             pending_search: false,
 
             fix_highlight_pattern: String::new(),
-            font_size: 14.0,
+            font_size: config.ui.font_size,
         }
     }
 }
@@ -335,7 +335,7 @@ struct TailState {
 }
 
 impl TailState {
-    fn new() -> Self {
+    fn new(config: &Config) -> Self {
         Self {
             files: Vec::new(),
             selected_file_index: None,
@@ -348,7 +348,7 @@ impl TailState {
             tree_filter: filter::TreeFilter::new(),
             log_level_filter: filter::LogLevelFilter::new(),
             last_poll_time: Instant::now(),
-            poll_interval_ms: 250,
+            poll_interval_ms: config.ui.poll_interval_ms,
             total_lines_received: 0,
             lines_dropped: 0,
             max_lines_per_poll: 100,
@@ -358,7 +358,7 @@ impl TailState {
             preview_follow_lines: 1000,
             preview_content: Vec::new(),
             preview_needs_reload: false,
-            font_size: 14.0,
+            font_size: config.ui.font_size,
             layout: None,
             control_panel_height: 250.0,
             max_filename_width: 200.0,  // Initial default, will be recalculated
@@ -454,7 +454,11 @@ impl Default for VisGrepApp {
 
 impl VisGrepApp {
     fn new(startup_config: StartupConfig) -> Self {
-        let mut tail_state = TailState::new();
+        // Load config first so we can use it for initialization
+        let config = Config::load();
+        let theme = config.theme;
+
+        let mut tail_state = TailState::new(&config);
 
         // Load layout file if provided
         if let Some(layout_path) = &startup_config.tail_layout {
@@ -462,7 +466,7 @@ impl VisGrepApp {
                 eprintln!("Failed to load layout file: {}", e);
             }
         }
-        
+
         // Add individual files from startup config
         for file_path in startup_config.tail_files {
             if let Err(e) = tail_state.add_file(file_path) {
@@ -470,13 +474,10 @@ impl VisGrepApp {
             }
         }
 
-        let config = Config::load();
-        let theme = config.theme;
-        
         Self {
             mode: startup_config.mode,
 
-            grep_state: GrepState::new(),
+            grep_state: GrepState::new(&config),
             tail_state,
 
             preview: FilePreview::new(),
