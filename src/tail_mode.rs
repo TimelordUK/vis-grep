@@ -908,8 +908,11 @@ impl VisGrepApp {
                         // Auto-focus the input
                         response.request_focus();
 
-                        // Handle Enter key
-                        if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        // Check for Enter key press
+                        let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+
+                        // Handle Enter key or lost focus with Enter
+                        if (response.lost_focus() && enter_pressed) || enter_pressed {
                             if let Ok(line_num) = self.tail_state.goto_line_input.parse::<usize>() {
                                 if line_num > 0 && line_num <= self.tail_state.preview_content.len() {
                                     self.tail_state.goto_line_target = Some(line_num - 1); // Convert to 0-indexed
