@@ -36,6 +36,9 @@ pub struct TextViewerState {
     /// Target line to scroll to (0-indexed)
     pub goto_line_target: Option<usize>,
 
+    /// Flag to scroll to bottom on next frame
+    pub scroll_to_bottom: bool,
+
     /// Input handler for vim-style navigation
     pub input_handler: InputHandler,
 }
@@ -50,6 +53,7 @@ impl TextViewerState {
             goto_line_active: false,
             goto_line_input: String::new(),
             goto_line_target: None,
+            scroll_to_bottom: false,
             input_handler: InputHandler::new(),
         }
     }
@@ -93,17 +97,18 @@ impl<'a> TextViewer<'a> {
         // Handle goto line input
         self.render_goto_line_input(ui);
 
-        // Capture goto target for use inside scroll area
+        // Capture goto target and scroll_to_bottom flag for use inside scroll area
         let goto_target = self.state.goto_line_target;
+        let scroll_to_bottom = self.state.scroll_to_bottom;
 
         // Content area - use all available space
-        // When we have a goto_line_target, don't set scroll_offset - let scroll_to_rect handle it
+        // When we have a goto_line_target or scroll_to_bottom, don't set scroll_offset - let scroll_to_rect handle it
         let scroll_area = if self.state.view_mode == ViewMode::Following {
             egui::ScrollArea::both()
                 .stick_to_bottom(true)
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
-        } else if goto_target.is_some() {
-            // Don't set scroll_offset when goto is active - let scroll_to_rect work
+        } else if goto_target.is_some() || scroll_to_bottom {
+            // Don't set scroll_offset when goto or scroll_to_bottom is active
             egui::ScrollArea::both()
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
         } else {
@@ -132,6 +137,7 @@ impl<'a> TextViewer<'a> {
                     for (line_idx, line) in self.content.iter().enumerate() {
                         let is_match = self.state.filter.match_lines.contains(&line_idx);
                         let is_current = self.state.filter.current_match_line() == Some(line_idx);
+                        let is_last_line = line_idx == self.content.len() - 1;
 
                         let response = filter::preview::render_filtered_line(
                             ui,
@@ -156,25 +162,37 @@ impl<'a> TextViewer<'a> {
                                 ui.scroll_to_rect(response.rect, Some(egui::Align::Center));
                             }
                         }
+
+                        // If we should scroll to bottom (G command), scroll to last line
+                        if scroll_to_bottom && is_last_line {
+                            info!("Scrolling to bottom (last line): {}", line_idx);
+                            // Scroll to show last line at bottom of viewport
+                            ui.scroll_to_rect(response.rect, None);
+                        }
                     }
                 }
             });
 
-        // Clear goto target after scroll area completes
+        // Clear goto target and scroll_to_bottom after scroll area completes
         if goto_target.is_some() {
             info!("Clearing goto_line_target after scroll area");
             self.state.goto_line_target = None;
+        }
+        if scroll_to_bottom {
+            info!("Clearing scroll_to_bottom flag after scroll area");
+            self.state.scroll_to_bottom = false;
         }
 
         // Update scroll offset
         if self.state.view_mode == ViewMode::Following {
             // In Following mode, we don't track manual scrolls
         } else {
-            if goto_target.is_none() {
+            if goto_target.is_none() && !scroll_to_bottom {
+                // Normal scrolling - just update offset
                 self.state.scroll_offset = scroll_output.state.offset.y;
             } else {
-                info!("After goto, scroll offset is now: {}", scroll_output.state.offset.y);
-                // Save the new offset for next frame
+                // After goto or scroll_to_bottom, save the new offset
+                info!("After goto/scroll_to_bottom, scroll offset is now: {}", scroll_output.state.offset.y);
                 self.state.scroll_offset = scroll_output.state.offset.y;
             }
         }
@@ -314,8 +332,8 @@ impl<'a> TextViewer<'a> {
                         handled = true;
                     }
                     NavigationCommand::LastMatch => {
-                        // G - go to bottom
-                        state.scroll_offset = f32::MAX;
+                        // G - scroll to bottom (flag for next frame)
+                        state.scroll_to_bottom = true;
                         state.view_mode = ViewMode::Paused;
                         handled = true;
                     }
