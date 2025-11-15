@@ -1,5 +1,6 @@
 use crate::{PreviewMode, VisGrepApp, get_color_for_file, filter, log_parser};
 use eframe::egui;
+use log::info;
 
 impl VisGrepApp {
     pub fn render_tail_mode_controls(&mut self, ui: &mut egui::Ui) {
@@ -915,7 +916,9 @@ impl VisGrepApp {
                         if (response.lost_focus() && enter_pressed) || enter_pressed {
                             if let Ok(line_num) = self.tail_state.goto_line_input.parse::<usize>() {
                                 if line_num > 0 && line_num <= self.tail_state.preview_content.len() {
-                                    self.tail_state.goto_line_target = Some(line_num - 1); // Convert to 0-indexed
+                                    let target = line_num - 1; // Convert to 0-indexed
+                                    info!("Goto line: user entered {}, setting target to {}", line_num, target);
+                                    self.tail_state.goto_line_target = Some(target);
                                     self.tail_state.preview_mode = PreviewMode::Paused;
                                 }
                             }
@@ -928,8 +931,8 @@ impl VisGrepApp {
                     });
                 }
 
-                // Capture goto line target before entering scroll area
-                let goto_target = self.tail_state.goto_line_target.take();
+                // Check if we have a goto line target
+                let goto_target = self.tail_state.goto_line_target;
 
                 // Content area - use all available space
                 let scroll_area = if self.tail_state.preview_mode == PreviewMode::Following {
@@ -984,6 +987,7 @@ impl VisGrepApp {
                                 // If we should scroll to goto line target, make it visible
                                 if let Some(target_line) = goto_target {
                                     if line_idx == target_line {
+                                        info!("Scrolling to line_idx: {}, target_line: {}", line_idx, target_line);
                                         let line_height = self.tail_state.font_size + 4.0;
                                         let target_y = line_idx as f32 * line_height;
                                         ui.scroll_to_rect(
@@ -993,6 +997,8 @@ impl VisGrepApp {
                                             ),
                                             Some(egui::Align::Center)
                                         );
+                                        // Clear the target after scrolling on next frame
+                                        self.tail_state.goto_line_target = None;
                                     }
                                 }
 
