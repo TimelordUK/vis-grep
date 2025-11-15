@@ -604,8 +604,12 @@ impl VisGrepApp {
                             }
                         }
 
-                        // Add lines to output buffer
+                        // Add lines to output buffer and track log levels
                         for line in &new_lines {
+                            // Detect and count log level for this line
+                            let level = self.log_detector.detect(line);
+                            *file.level_counts_since_last_read.entry(level).or_insert(0) += 1;
+
                             let log_line = LogLine {
                                 timestamp: now,
                                 source_file: file.display_name.clone(),
@@ -641,7 +645,8 @@ impl VisGrepApp {
                             if file.is_active {
                                 file.is_active = false;
                                 file.lines_since_last_read = 0;
-                                
+                                file.level_counts_since_last_read.clear();
+
                                 // Store activity change to propagate later
                                 if let Some(group_id) = &file.group_id {
                                     activity_changes.push((group_id.clone(), false));

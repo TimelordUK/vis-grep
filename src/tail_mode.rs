@@ -451,23 +451,51 @@ impl VisGrepApp {
                 egui::Label::new(format!("{:.1} KB", file.last_size as f64 / 1024.0))
             );
 
-            // Activity info - fixed width to prevent jumping
-            let status_text = if file.is_active && file.lines_since_last_read > 0 {
-                format!("(+{} lines)", file.lines_since_last_read)
-            } else if !file.is_active {
-                "(idle)".to_string()
-            } else {
-                "".to_string()
-            };
+            // Activity info - show log level counts if available, otherwise line count
+            let (status_text, status_color) = if file.is_active && file.lines_since_last_read > 0 {
+                // Check if we have level counts to display
+                if !file.level_counts_since_last_read.is_empty() {
+                    // Build a compact display of significant log levels
+                    let mut parts = Vec::new();
 
-            let status_color = if file.is_active && file.lines_since_last_read > 0 {
-                egui::Color32::from_rgb(255, 200, 100)
+                    // Priority order: FATAL, ERROR, WARN, INFO, DEBUG, TRACE, UNKNOWN
+                    use log_parser::LogLevel;
+                    let priority_levels = [
+                        (LogLevel::Fatal, "FTL"),
+                        (LogLevel::Error, "ERR"),
+                        (LogLevel::Warn, "WRN"),
+                        (LogLevel::Info, "INF"),
+                        (LogLevel::Debug, "DBG"),
+                        (LogLevel::Trace, "TRC"),
+                        (LogLevel::Unknown, "UNK"),
+                    ];
+
+                    for (level, abbrev) in &priority_levels {
+                        if let Some(count) = file.level_counts_since_last_read.get(level) {
+                            if *count > 0 {
+                                parts.push(format!("{}:{}", abbrev, count));
+                            }
+                        }
+                    }
+
+                    let text = if parts.is_empty() {
+                        format!("(+{} lines)", file.lines_since_last_read)
+                    } else {
+                        format!("({})", parts.join(" "))
+                    };
+
+                    (text, egui::Color32::from_rgb(255, 200, 100))
+                } else {
+                    (format!("(+{} lines)", file.lines_since_last_read), egui::Color32::from_rgb(255, 200, 100))
+                }
+            } else if !file.is_active {
+                ("(idle)".to_string(), egui::Color32::GRAY)
             } else {
-                egui::Color32::GRAY
+                ("".to_string(), egui::Color32::GRAY)
             };
 
             ui.add_sized(
-                egui::vec2(100.0, 20.0),
+                egui::vec2(150.0, 20.0),  // Increased width to accommodate level counts
                 egui::Label::new(egui::RichText::new(status_text).color(status_color))
             );
 
