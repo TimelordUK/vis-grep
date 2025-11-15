@@ -59,7 +59,7 @@ pub fn render_filtered_line(
     filter: &PreviewFilter,
     log_detector: &LogLevelDetector,
     color_scheme: &LogColorScheme,
-) {
+) -> egui::Response {
     let bg_color = if is_current_match {
         Color32::from_rgb(80, 80, 0)  // Yellow highlight for current match
     } else if is_match {
@@ -101,7 +101,7 @@ pub fn render_filtered_line(
         } else {
             ui.label(RichText::new(line).monospace().color(base_color));
         }
-    });
+    }).response
 }
 
 fn render_highlighted_text(ui: &mut egui::Ui, text: &str, filter: &PreviewFilter, base_color: Color32) {

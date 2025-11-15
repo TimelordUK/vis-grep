@@ -979,37 +979,8 @@ impl VisGrepApp {
                                 let is_match = filter.match_lines.contains(&line_idx);
                                 let is_current = filter.current_match_line() == Some(line_idx);
 
-                                // If we should scroll to this match, make it visible
-                                if scroll_to_match && is_current {
-                                    let line_height = self.tail_state.font_size + 4.0;
-                                    let target_y = line_idx as f32 * line_height;
-                                    ui.scroll_to_rect(
-                                        egui::Rect::from_min_size(
-                                            egui::pos2(0.0, target_y),
-                                            egui::vec2(100.0, line_height)
-                                        ),
-                                        Some(egui::Align::Center)
-                                    );
-                                }
-
-                                // If we should scroll to goto line target, make it visible
-                                if let Some(target_line) = goto_target {
-                                    if line_idx == target_line {
-                                        info!("Scrolling to line_idx: {}, target_line: {}", line_idx, target_line);
-                                        let line_height = self.tail_state.font_size + 4.0;
-                                        let target_y = line_idx as f32 * line_height;
-                                        ui.scroll_to_rect(
-                                            egui::Rect::from_min_size(
-                                                egui::pos2(0.0, target_y),
-                                                egui::vec2(100.0, line_height)
-                                            ),
-                                            Some(egui::Align::Center)
-                                        );
-                                    }
-                                }
-
                                 let color_scheme = self.config.log_format.get_color_scheme();
-                                filter::preview::render_filtered_line(
+                                let response = filter::preview::render_filtered_line(
                                     ui,
                                     line,
                                     line_idx + 1,
@@ -1019,6 +990,19 @@ impl VisGrepApp {
                                     &self.log_detector,
                                     &color_scheme,
                                 );
+
+                                // If we should scroll to this match, make it visible using actual rect
+                                if scroll_to_match && is_current {
+                                    ui.scroll_to_rect(response.rect, Some(egui::Align::Center));
+                                }
+
+                                // If we should scroll to goto line target, make it visible using actual rect
+                                if let Some(target_line) = goto_target {
+                                    if line_idx == target_line {
+                                        info!("Scrolling to line_idx: {}, target_line: {}, rect: {:?}", line_idx, target_line, response.rect);
+                                        ui.scroll_to_rect(response.rect, Some(egui::Align::Center));
+                                    }
+                                }
                             }
                         }
                     });
