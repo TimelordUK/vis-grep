@@ -626,12 +626,17 @@ impl VisGrepApp {
     pub fn render_tail_preview(&mut self, ui: &mut egui::Ui) {
         if let Some(file_idx) = self.tail_state.preview_selected_file {
             if file_idx < self.tail_state.files.len() {
-                let file = &self.tail_state.files[file_idx];
+                // Clone what we need before the closure
+                let file_path = self.tail_state.files[file_idx].path.clone();
+                let file_display_name = self.tail_state.files[file_idx].display_name.clone();
+                let file_last_size = self.tail_state.files[file_idx].last_size;
+                
+                let mut open_editor = false;
 
                 // Header
                 ui.horizontal(|ui| {
                     // Extract parent directory for display
-                    let parent_dir = file.path.parent()
+                    let parent_dir = file_path.parent()
                         .and_then(|p| p.file_name())
                         .and_then(|n| n.to_str())
                         .unwrap_or("");
@@ -640,20 +645,20 @@ impl VisGrepApp {
                         format!(
                             "Preview: {}/{} ({:.1} KB)",
                             parent_dir,
-                            file.display_name,
-                            file.last_size as f64 / 1024.0
+                            file_display_name,
+                            file_last_size as f64 / 1024.0
                         )
                     } else {
                         format!(
                             "Preview: {} ({:.1} KB)",
-                            file.display_name,
-                            file.last_size as f64 / 1024.0
+                            file_display_name,
+                            file_last_size as f64 / 1024.0
                         )
                     };
                     
                     // Label with tooltip showing full path
                     let label_response = ui.label(header_text);
-                    label_response.on_hover_text(format!("Full path: {}", file.path.display()));
+                    label_response.on_hover_text(format!("Full path: {}", file_path.display()));
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // Pause/Follow toggle
@@ -677,7 +682,12 @@ impl VisGrepApp {
                         
                         // Open in Explorer button
                         if ui.button("📁 Explorer").on_hover_text("Open file location in Explorer/Finder").clicked() {
-                            VisGrepApp::open_path_in_explorer(&file.path);
+                            VisGrepApp::open_path_in_explorer(&file_path);
+                        }
+                        
+                        // Open in Editor button
+                        if ui.button("📝 Editor").on_hover_text("Open file in editor").clicked() {
+                            open_editor = true;
                         }
                         
                         // Copy path button
@@ -685,7 +695,7 @@ impl VisGrepApp {
                             use arboard::Clipboard;
                             match Clipboard::new() {
                                 Ok(mut clipboard) => {
-                                    let path_str = file.path.to_string_lossy().to_string();
+                                    let path_str = file_path.to_string_lossy().to_string();
                                     match clipboard.set_text(&path_str) {
                                         Ok(_) => log::info!("Copied path to clipboard: {}", path_str),
                                         Err(e) => log::error!("Failed to copy path: {}", e),
@@ -820,6 +830,11 @@ impl VisGrepApp {
                         }
                     });
                 });
+                
+                // Handle editor opening outside of closures
+                if open_editor {
+                    self.open_file_in_editor(&file_path);
+                }
             } else {
                 // Invalid file index
                 ui.centered_and_justified(|ui| {

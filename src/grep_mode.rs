@@ -74,8 +74,13 @@ impl VisGrepApp {
             ui.separator();
             
             // Open in Explorer button
-            if ui.button("📁 Open File").on_hover_text("Open selected file location in Explorer/Finder").clicked() {
+            if ui.button("📁 Explorer").on_hover_text("Open file location in Explorer/Finder").clicked() {
                 self.open_in_explorer();
+            }
+            
+            // Open in Editor button
+            if ui.button("📝 Editor").on_hover_text("Open file in editor").clicked() {
+                self.open_in_editor();
             }
         });
         ui.separator();

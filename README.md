@@ -75,7 +75,7 @@ cargo build --release
 
 - [ ] Syntax highlighting for code previews
 - [ ] Support for archived/zipped logs
-- [ ] Double-click to open file in $EDITOR
+- [x] Open file in editor (configurable via config.yaml or $EDITOR)
 - [ ] Search history
 - [ ] Export results
 - [ ] Bookmarks/favorites for common searches

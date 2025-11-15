@@ -21,12 +21,21 @@ pub struct SavedPattern {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditorConfig {
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub folder_presets: Vec<FolderPreset>,
     #[serde(default)]
     pub saved_patterns: Vec<SavedPattern>,
     #[serde(default)]
     pub theme: Theme,
+    #[serde(default)]
+    pub editor: Option<EditorConfig>,
 }
 
 impl Default for Config {
@@ -44,6 +53,7 @@ impl Default for Config {
             ],
             saved_patterns: vec![],
             theme: Theme::default(),
+            editor: None,
         }
     }
 }
@@ -145,6 +155,14 @@ impl Config {
                 },
             ],
             theme: Theme::default(),
+            editor: Some(EditorConfig {
+                command: if cfg!(windows) { 
+                    "notepad".to_string() 
+                } else { 
+                    "code".to_string() 
+                },
+                args: vec![],
+            }),
         };
 
         example.save()

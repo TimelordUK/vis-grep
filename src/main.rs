@@ -980,6 +980,21 @@ impl VisGrepApp {
         }
     }
 
+    fn open_in_editor(&self) {
+        if self.grep_state.results.is_empty() {
+            info!("No results to open");
+            return;
+        }
+        
+        let current_file_idx = self.grep_state.selected_result.unwrap_or(0) / 10000;
+        if current_file_idx >= self.grep_state.results.len() {
+            info!("Invalid file index");
+            return;
+        }
+        let file_path = &self.grep_state.results[current_file_idx].file_path;
+        self.open_file_in_editor(file_path);
+    }
+    
     fn open_in_explorer(&self) {
         if self.grep_state.results.is_empty() {
             info!("No results to open");
@@ -996,6 +1011,75 @@ impl VisGrepApp {
 
         let file_path = &self.grep_state.results[current_file_idx].file_path;
         Self::open_path_in_explorer(file_path);
+    }
+    
+    /// Open a file in the configured editor
+    fn open_file_in_editor(&self, file_path: &std::path::Path) {
+        // Try config first, then environment variables
+        let editor_config = if let Some(ref editor) = self.config.editor {
+            Some((editor.command.clone(), editor.args.clone()))
+        } else {
+            // Check common environment variables
+            let editor_var = std::env::var("VISUAL")
+                .or_else(|_| std::env::var("EDITOR"))
+                .ok();
+            
+            editor_var.map(|cmd| {
+                // Split command and args (simple parsing)
+                let parts: Vec<String> = cmd.split_whitespace().map(|s| s.to_string()).collect();
+                if parts.is_empty() {
+                    (cmd, vec![])
+                } else {
+                    (parts[0].clone(), parts[1..].to_vec())
+                }
+            })
+        };
+        
+        if let Some((command, args)) = editor_config {
+            info!("Opening file in editor: {} {:?} {:?}", command, args, file_path);
+            
+            let mut cmd = std::process::Command::new(&command);
+            for arg in &args {
+                cmd.arg(arg);
+            }
+            cmd.arg(file_path);
+            
+            match cmd.spawn() {
+                Ok(_) => {
+                    info!("Opened file in editor: {:?}", file_path);
+                }
+                Err(e) => {
+                    info!("Failed to open editor: {}", e);
+                    // Fall back to trying common editors
+                    self.try_fallback_editors(file_path);
+                }
+            }
+        } else {
+            // No editor configured, try common ones
+            self.try_fallback_editors(file_path);
+        }
+    }
+    
+    /// Try common editors as fallback
+    fn try_fallback_editors(&self, file_path: &std::path::Path) {
+        #[cfg(target_os = "windows")]
+        let editors = vec!["notepad++.exe", "notepad.exe"];
+        
+        #[cfg(not(target_os = "windows"))]
+        let editors = vec!["code", "vim", "nano", "gedit", "kate"];
+        
+        for editor in editors {
+            if std::process::Command::new(editor)
+                .arg(file_path)
+                .spawn()
+                .is_ok()
+            {
+                info!("Opened file with {}: {:?}", editor, file_path);
+                return;
+            }
+        }
+        
+        info!("Could not find any editor to open file");
     }
     
     /// Open a file path in the system file explorer (reusable static method)
