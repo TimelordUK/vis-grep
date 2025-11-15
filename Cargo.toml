@@ -18,3 +18,4 @@ rfd = "0.15"     # Native file/folder dialogs
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 clap = { version = "4.5", features = ["derive"] }  # Command-line argument parsing
+once_cell = "1.21.3"

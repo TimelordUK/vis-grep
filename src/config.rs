@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use crate::theme::Theme;
+use crate::log_parser::LogColorScheme;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FolderPreset {
@@ -28,6 +29,27 @@ pub struct EditorConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogFormatConfig {
+    /// Custom regex patterns for log level detection
+    /// Format: (pattern, level_name) where level_name is: TRACE, DEBUG, INFO, WARN, ERROR, FATAL
+    #[serde(default)]
+    pub custom_patterns: Vec<(String, String)>,
+
+    /// Color scheme for log levels
+    #[serde(default)]
+    pub colors: LogColorScheme,
+}
+
+impl Default for LogFormatConfig {
+    fn default() -> Self {
+        Self {
+            custom_patterns: vec![],
+            colors: LogColorScheme::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub folder_presets: Vec<FolderPreset>,
     #[serde(default)]
@@ -36,6 +58,8 @@ pub struct Config {
     pub theme: Theme,
     #[serde(default)]
     pub editor: Option<EditorConfig>,
+    #[serde(default)]
+    pub log_format: LogFormatConfig,
 }
 
 impl Default for Config {
@@ -54,6 +78,7 @@ impl Default for Config {
             saved_patterns: vec![],
             theme: Theme::default(),
             editor: None,
+            log_format: LogFormatConfig::default(),
         }
     }
 }
@@ -177,13 +202,14 @@ impl Config {
             ],
             theme: Theme::default(),
             editor: Some(EditorConfig {
-                command: if cfg!(windows) { 
-                    "notepad".to_string() 
-                } else { 
-                    "code".to_string() 
+                command: if cfg!(windows) {
+                    "notepad".to_string()
+                } else {
+                    "code".to_string()
                 },
                 args: vec![],
             }),
+            log_format: LogFormatConfig::default(),
         };
 
         example.save()

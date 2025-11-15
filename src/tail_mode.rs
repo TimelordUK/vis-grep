@@ -807,7 +807,9 @@ impl VisGrepApp {
                                     line_idx + 1,
                                     is_match,
                                     is_current,
-                                    filter
+                                    filter,
+                                    &self.log_detector,
+                                    &self.config.log_format.colors,
                                 );
                             }
                         }

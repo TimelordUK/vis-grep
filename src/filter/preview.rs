@@ -1,5 +1,6 @@
 use eframe::egui::{self, Color32, TextEdit, RichText, TextStyle};
 use super::state::PreviewFilter;
+use crate::log_parser::{LogLevelDetector, LogColorScheme};
 
 pub fn render_filter_input(ui: &mut egui::Ui, filter: &mut PreviewFilter) -> bool {
     let mut filter_changed = false;
@@ -56,6 +57,8 @@ pub fn render_filtered_line(
     is_match: bool,
     is_current_match: bool,
     filter: &PreviewFilter,
+    log_detector: &LogLevelDetector,
+    color_scheme: &LogColorScheme,
 ) {
     let bg_color = if is_current_match {
         Color32::from_rgb(80, 80, 0)  // Yellow highlight for current match
@@ -89,32 +92,35 @@ pub fn render_filtered_line(
         // Allocate space for the line number
         ui.allocate_space(galley.size());
 
-        // Line content with match highlighting (selectable)
+        // Line content with match highlighting and log level coloring (selectable)
+        let log_level = log_detector.detect(line);
+        let base_color = color_scheme.get_color(log_level);
+
         if is_match && filter.active {
-            render_highlighted_text(ui, line, filter);
+            render_highlighted_text(ui, line, filter, base_color);
         } else {
-            ui.label(RichText::new(line).monospace());
+            ui.label(RichText::new(line).monospace().color(base_color));
         }
     });
 }
 
-fn render_highlighted_text(ui: &mut egui::Ui, text: &str, filter: &PreviewFilter) {
+fn render_highlighted_text(ui: &mut egui::Ui, text: &str, filter: &PreviewFilter, base_color: Color32) {
     let matches = filter.find_matches(text);
-    
+
     if matches.is_empty() {
-        ui.label(RichText::new(text).monospace());
+        ui.label(RichText::new(text).monospace().color(base_color));
         return;
     }
 
     let mut last_end = 0;
-    
+
     ui.horizontal_wrapped(|ui| {
         for (start, end) in matches {
             // Text before match
             if start > last_end {
-                ui.label(RichText::new(&text[last_end..start]).monospace());
+                ui.label(RichText::new(&text[last_end..start]).monospace().color(base_color));
             }
-            
+
             // Highlighted match
             ui.label(
                 RichText::new(&text[start..end])
@@ -122,13 +128,13 @@ fn render_highlighted_text(ui: &mut egui::Ui, text: &str, filter: &PreviewFilter
                     .background_color(Color32::from_rgb(255, 255, 0))
                     .color(Color32::BLACK)
             );
-            
+
             last_end = end;
         }
-        
+
         // Remaining text after last match
         if last_end < text.len() {
-            ui.label(RichText::new(&text[last_end..]).monospace());
+            ui.label(RichText::new(&text[last_end..]).monospace().color(base_color));
         }
     });
 }

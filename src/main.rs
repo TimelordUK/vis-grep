@@ -16,6 +16,7 @@ mod splitter;
 mod tail_layout;
 mod theme;
 mod filter;
+mod log_parser;
 
 use config::Config;
 use input_handler::{InputHandler, NavigationCommand};
@@ -436,6 +437,9 @@ struct VisGrepApp {
 
     config: Config,
     theme: Theme,
+
+    // Log level detection
+    log_detector: log_parser::LogLevelDetector,
 }
 
 impl Default for VisGrepApp {
@@ -481,6 +485,8 @@ impl VisGrepApp {
 
             config,
             theme,
+
+            log_detector: log_parser::LogLevelDetector::new(),
         }
     }
 
