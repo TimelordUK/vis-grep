@@ -1,7 +1,7 @@
 use arboard::Clipboard;
 use clap::{Parser, Subcommand};
 use eframe::egui;
-use log::info;
+use log::{info, warn};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -1955,6 +1955,19 @@ fn main() -> eframe::Result<()> {
 
     // Parse command-line arguments
     let cli = Cli::parse();
+    
+    // Print config path for debugging
+    if let Some(config_path) = Config::config_path() {
+        info!("Config file location: {:?}", config_path);
+        if !config_path.exists() {
+            info!("Config file does not exist. Creating example config...");
+            if let Err(e) = Config::create_example() {
+                warn!("Failed to create example config: {}", e);
+            } else {
+                info!("Created example config at {:?}", config_path);
+            }
+        }
+    }
 
     // Determine startup configuration
     let startup_config = match cli.command {

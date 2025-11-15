@@ -2,11 +2,19 @@
 
 VisGrep now supports opening files directly in your preferred text editor from both grep and tail modes.
 
+## Config File Location
+
+The config file is located at:
+- **Windows**: `%APPDATA%\vis-grep\config.yaml` (e.g., `C:\Users\YourName\AppData\Roaming\vis-grep\config.yaml`)
+- **Linux/macOS**: `~/.config/vis-grep/config.yaml`
+
+If the config file doesn't exist, VisGrep will create an example one on first run.
+
 ## Configuration
 
 ### Using config.yaml
 
-Add an `editor` section to your `~/.config/vis-grep/config.yaml`:
+Add an `editor` section to your config file:
 
 ```yaml
 editor:

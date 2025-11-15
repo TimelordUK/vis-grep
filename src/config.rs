@@ -59,17 +59,38 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Get the config file path (~/.config/vis-grep/config.yaml)
+    /// Get the config file path
+    /// - Windows: %APPDATA%\vis-grep\config.yaml
+    /// - Linux/Mac: ~/.config/vis-grep/config.yaml
     pub fn config_path() -> Option<PathBuf> {
-        if let Some(home) = std::env::var_os("HOME") {
-            let mut path = PathBuf::from(home);
-            path.push(".config");
-            path.push("vis-grep");
-            path.push("config.yaml");
-            Some(path)
-        } else {
-            None
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(app_data) = std::env::var_os("APPDATA") {
+                let mut path = PathBuf::from(app_data);
+                path.push("vis-grep");
+                path.push("config.yaml");
+                return Some(path);
+            } else if let Some(user_profile) = std::env::var_os("USERPROFILE") {
+                let mut path = PathBuf::from(user_profile);
+                path.push(".config");
+                path.push("vis-grep");
+                path.push("config.yaml");
+                return Some(path);
+            }
         }
+        
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Some(home) = std::env::var_os("HOME") {
+                let mut path = PathBuf::from(home);
+                path.push(".config");
+                path.push("vis-grep");
+                path.push("config.yaml");
+                return Some(path);
+            }
+        }
+        
+        None
     }
 
     /// Load config from file, or create default if not exists
