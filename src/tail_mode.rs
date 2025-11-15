@@ -928,6 +928,9 @@ impl VisGrepApp {
                     });
                 }
 
+                // Capture goto line target before entering scroll area
+                let goto_target = self.tail_state.goto_line_target.take();
+
                 // Content area - use all available space
                 let scroll_area = if self.tail_state.preview_mode == PreviewMode::Following {
                     egui::ScrollArea::both()
@@ -979,7 +982,7 @@ impl VisGrepApp {
                                 }
 
                                 // If we should scroll to goto line target, make it visible
-                                if let Some(target_line) = self.tail_state.goto_line_target {
+                                if let Some(target_line) = goto_target {
                                     if line_idx == target_line {
                                         let line_height = self.tail_state.font_size + 4.0;
                                         let target_y = line_idx as f32 * line_height;
@@ -990,8 +993,6 @@ impl VisGrepApp {
                                             ),
                                             Some(egui::Align::Center)
                                         );
-                                        // Clear the target after scrolling
-                                        self.tail_state.goto_line_target = None;
                                     }
                                 }
 
