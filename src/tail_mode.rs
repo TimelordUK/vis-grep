@@ -1005,8 +1005,6 @@ impl VisGrepApp {
                                             ),
                                             Some(egui::Align::Center)
                                         );
-                                        // Clear the target after scrolling on next frame
-                                        self.tail_state.goto_line_target = None;
                                     }
                                 }
 
@@ -1025,6 +1023,12 @@ impl VisGrepApp {
                         }
                     });
 
+                // Clear goto target after scroll area completes
+                if goto_target.is_some() {
+                    info!("Clearing goto_line_target after scroll area");
+                    self.tail_state.goto_line_target = None;
+                }
+
                 // Detect manual scroll (switch to Paused mode)
                 if self.tail_state.preview_mode == PreviewMode::Following {
                     // In Following mode, we don't track manual scrolls
@@ -1034,7 +1038,9 @@ impl VisGrepApp {
                     if goto_target.is_none() {
                         self.tail_state.preview_scroll_offset = scroll_output.state.offset.y;
                     } else {
-                        info!("Skipping scroll offset update during goto, current offset: {}", scroll_output.state.offset.y);
+                        info!("After goto, scroll offset is now: {}", scroll_output.state.offset.y);
+                        // Save the new offset for next frame
+                        self.tail_state.preview_scroll_offset = scroll_output.state.offset.y;
                     }
                 }
 
