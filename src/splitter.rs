@@ -70,18 +70,22 @@ impl Splitter {
             SplitterAxis::Horizontal => whole_area.x,
             SplitterAxis::Vertical => whole_area.y,
         };
-        
-        let split_a_size = ((split_axis_size - sep_size) * data.pos);
-        let split_b_size = split_axis_size - sep_size - split_a_size;
+
+        // Ensure we have enough space for the separator
+        // If not, just give all space to first panel and skip separator
+        let available_for_split = (split_axis_size - sep_size).max(0.0);
+
+        let split_a_size = (available_for_split * data.pos).max(0.0);
+        let split_b_size = (available_for_split - split_a_size).max(0.0);
 
         let child_size_a = match data.axis {
-            SplitterAxis::Horizontal => Vec2::new(split_a_size, whole_area.y),
-            SplitterAxis::Vertical => Vec2::new(whole_area.x, split_a_size),
+            SplitterAxis::Horizontal => Vec2::new(split_a_size, whole_area.y.max(0.0)),
+            SplitterAxis::Vertical => Vec2::new(whole_area.x.max(0.0), split_a_size),
         };
 
         let child_size_b = match data.axis {
-            SplitterAxis::Horizontal => Vec2::new(split_b_size, whole_area.y),
-            SplitterAxis::Vertical => Vec2::new(whole_area.x, split_b_size),
+            SplitterAxis::Horizontal => Vec2::new(split_b_size, whole_area.y.max(0.0)),
+            SplitterAxis::Vertical => Vec2::new(whole_area.x.max(0.0), split_b_size),
         };
 
         let child_rect_a = Rect::from_min_size(ui.next_widget_position(), child_size_a);
@@ -90,11 +94,11 @@ impl Splitter {
         let sep_rect = match data.axis {
             SplitterAxis::Horizontal => Rect::from_min_size(
                 Pos2::new(child_rect_a.max.x, child_rect_a.min.y),
-                Vec2::new(sep_size, whole_area.y),
+                Vec2::new(sep_size, whole_area.y.max(0.0)),
             ),
             SplitterAxis::Vertical => Rect::from_min_size(
                 Pos2::new(child_rect_a.min.x, child_rect_a.max.y),
-                Vec2::new(whole_area.x, sep_size),
+                Vec2::new(whole_area.x.max(0.0), sep_size),
             ),
         };
 
