@@ -2,6 +2,7 @@ use eframe::egui;
 use log::info;
 use crate::filter;
 use crate::log_parser::{LogLevelDetector, LogColorScheme};
+use crate::input_handler::{InputHandler, NavigationCommand};
 
 /// View mode determines scrolling behavior
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -34,6 +35,9 @@ pub struct TextViewerState {
 
     /// Target line to scroll to (0-indexed)
     pub goto_line_target: Option<usize>,
+
+    /// Input handler for vim-style navigation
+    pub input_handler: InputHandler,
 }
 
 impl TextViewerState {
@@ -46,6 +50,7 @@ impl TextViewerState {
             goto_line_active: false,
             goto_line_input: String::new(),
             goto_line_target: None,
+            input_handler: InputHandler::new(),
         }
     }
 }
@@ -241,14 +246,12 @@ impl<'a> TextViewer<'a> {
     }
 
     /// Handle keyboard input for vim-style navigation
-    /// Returns true if the input was handled
+    /// Call this from your event handler to process navigation commands
     pub fn handle_input(
         state: &mut TextViewerState,
-        content: &[String],
+        _content: &[String],
         ctx: &egui::Context,
     ) -> bool {
-        use crate::input_handler::InputHandler;
-
         // Check if any text input is focused (skip vim keys if typing)
         if ctx.wants_keyboard_input() {
             return false;
@@ -256,6 +259,7 @@ impl<'a> TextViewer<'a> {
 
         let mut handled = false;
 
+        // Handle goto line and filter activation (not in InputHandler)
         ctx.input(|i| {
             // Handle goto line command
             if i.key_pressed(egui::Key::Colon) && !state.goto_line_active && !state.filter.active {
@@ -272,7 +276,7 @@ impl<'a> TextViewer<'a> {
                 return;
             }
 
-            // Filter navigation
+            // Filter navigation (n/N when filter is active)
             if state.filter.active {
                 if i.key_pressed(egui::Key::N) {
                     if i.modifiers.shift {
@@ -285,9 +289,8 @@ impl<'a> TextViewer<'a> {
                 }
             }
 
-            // Vim navigation (only when not in command/filter mode)
+            // Simple j/k scrolling (not in InputHandler, too specific)
             if !state.goto_line_active && !state.filter.active {
-                // j/k scrolling
                 if i.key_pressed(egui::Key::J) {
                     state.scroll_offset += state.font_size + 4.0;
                     state.view_mode = ViewMode::Paused;
@@ -297,22 +300,45 @@ impl<'a> TextViewer<'a> {
                     state.view_mode = ViewMode::Paused;
                     handled = true;
                 }
-
-                // gg/G navigation
-                if i.key_pressed(egui::Key::G) {
-                    if i.modifiers.shift {
-                        // G - go to end
-                        state.scroll_offset = f32::MAX;
-                        state.view_mode = ViewMode::Paused;
-                    } else {
-                        // gg - go to top (need to detect double-g somehow)
-                        state.scroll_offset = 0.0;
-                        state.view_mode = ViewMode::Paused;
-                    }
-                    handled = true;
-                }
             }
         });
+
+        // Use InputHandler for gg/G and other complex navigation
+        if !state.goto_line_active && !state.filter.active && !handled {
+            if let Some(command) = state.input_handler.process_input(ctx) {
+                match command {
+                    NavigationCommand::FirstMatch => {
+                        // gg - go to top
+                        state.scroll_offset = 0.0;
+                        state.view_mode = ViewMode::Paused;
+                        handled = true;
+                    }
+                    NavigationCommand::LastMatch => {
+                        // G - go to bottom
+                        state.scroll_offset = f32::MAX;
+                        state.view_mode = ViewMode::Paused;
+                        handled = true;
+                    }
+                    NavigationCommand::NextMatch => {
+                        // n - next match (when filter active, handled above)
+                        if state.filter.active {
+                            state.filter.next_match();
+                            handled = true;
+                        }
+                    }
+                    NavigationCommand::PreviousMatch => {
+                        // p - previous match (when filter active)
+                        if state.filter.active {
+                            state.filter.prev_match();
+                            handled = true;
+                        }
+                    }
+                    _ => {
+                        // Other commands not applicable to text viewer
+                    }
+                }
+            }
+        }
 
         handled
     }

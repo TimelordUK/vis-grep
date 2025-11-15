@@ -979,74 +979,32 @@ impl VisGrepApp {
         
         // Handle preview navigation (if a file is selected)
         if self.tail_state.preview_selected_file.is_some() {
+            // Use TextViewer's input handler for all navigation
+            widgets::TextViewer::handle_input(
+                &mut self.tail_state.text_viewer_state,
+                &self.tail_state.preview_content,
+                ctx
+            );
+
+            // Sync state back from text_viewer_state
+            self.tail_state.preview_mode = match self.tail_state.text_viewer_state.view_mode {
+                widgets::ViewMode::Following => PreviewMode::Following,
+                widgets::ViewMode::Paused => PreviewMode::Paused,
+            };
+            self.tail_state.preview_scroll_offset = self.tail_state.text_viewer_state.scroll_offset;
+            self.tail_state.preview_filter = self.tail_state.text_viewer_state.filter.clone();
+
+            // Keep Ctrl+D/U page scrolling and Escape handling
             ctx.input(|i| {
-                // / - activate filter
-                if i.key_pressed(egui::Key::Slash) && !self.tail_state.preview_filter.active {
-                    self.tail_state.preview_filter.activate();
-                }
-                
                 // Escape - deactivate filter or goto line mode
                 if i.key_pressed(egui::Key::Escape) {
-                    if self.tail_state.preview_filter.active {
+                    if self.tail_state.text_viewer_state.filter.active {
+                        self.tail_state.text_viewer_state.filter.deactivate();
                         self.tail_state.preview_filter.deactivate();
                     } else if self.tail_state.text_viewer_state.goto_line_active {
                         self.tail_state.text_viewer_state.goto_line_active = false;
                         self.tail_state.text_viewer_state.goto_line_input.clear();
                         self.tail_state.text_viewer_state.goto_line_target = None;
-                    }
-                }
-
-                // : - activate goto line mode
-                if !self.tail_state.preview_filter.active && !self.tail_state.text_viewer_state.goto_line_active {
-                    if i.events.iter().any(|e| matches!(e, egui::Event::Text(s) if s == ":")) {
-                        self.tail_state.text_viewer_state.goto_line_active = true;
-                        self.tail_state.text_viewer_state.goto_line_input.clear();
-                    }
-                }
-
-                // n - next match
-                if i.key_pressed(egui::Key::N) && !i.modifiers.shift && self.tail_state.preview_filter.active {
-                    self.tail_state.preview_filter.next_match();
-                    if let Some(line_idx) = self.tail_state.preview_filter.current_match_line() {
-                        // Calculate scroll position to center the match
-                        let line_height = 20.0; // Approximate line height
-                        self.tail_state.preview_scroll_offset = (line_idx as f32 * line_height).max(0.0);
-                        self.tail_state.preview_mode = PreviewMode::Paused;
-                    }
-                }
-                
-                // N (Shift+n) - previous match  
-                if i.key_pressed(egui::Key::N) && i.modifiers.shift && self.tail_state.preview_filter.active {
-                    self.tail_state.preview_filter.prev_match();
-                    if let Some(line_idx) = self.tail_state.preview_filter.current_match_line() {
-                        // Calculate scroll position to center the match
-                        let line_height = 20.0; // Approximate line height
-                        self.tail_state.preview_scroll_offset = (line_idx as f32 * line_height).max(0.0);
-                        self.tail_state.preview_mode = PreviewMode::Paused;
-                    }
-                }
-                
-                // j - scroll down
-                if i.key_pressed(egui::Key::J) && !i.modifiers.ctrl {
-                    self.tail_state.preview_scroll_offset += 20.0;
-                    self.tail_state.preview_mode = PreviewMode::Paused;
-                }
-                // k - scroll up
-                if i.key_pressed(egui::Key::K) && !i.modifiers.ctrl {
-                    self.tail_state.preview_scroll_offset =
-                        (self.tail_state.preview_scroll_offset - 20.0).max(0.0);
-                    self.tail_state.preview_mode = PreviewMode::Paused;
-                }
-                // g - handle gg (jump to top) or G (jump to bottom and follow)
-                if i.key_pressed(egui::Key::G) {
-                    if i.modifiers.shift {
-                        // Shift+G - jump to end and resume following
-                        self.tail_state.preview_mode = PreviewMode::Following;
-                        self.tail_state.preview_scroll_offset = 0.0;
-                    } else {
-                        // g (will be gg with double-tap, but for now just jump to top)
-                        self.tail_state.preview_scroll_offset = 0.0;
-                        self.tail_state.preview_mode = PreviewMode::Paused;
                     }
                 }
                 // Ctrl+D - page down
