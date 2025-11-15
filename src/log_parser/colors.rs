@@ -58,10 +58,10 @@ impl LogColorScheme {
         Self {
             trace: "#4B5563".to_string(),      // Dark gray
             debug: "#6B7280".to_string(),      // Medium-dark gray
-            info: "#D1D5DB".to_string(),       // Light gray (default text)
-            warn: "#9CA3AF".to_string(),       // Medium gray
-            error: "#EF4444".to_string(),      // Red (only color)
-            fatal: "#DC2626".to_string(),      // Bright red
+            info: "#9CA3AF".to_string(),       // Medium gray
+            warn: "#D1D5DB".to_string(),       // Light gray (brighter than info)
+            error: "#F87171".to_string(),      // Softer red (from Subtle theme)
+            fatal: "#EF4444".to_string(),      // Medium red (toned down from bright)
             unknown: "#9CA3AF".to_string(),    // Medium gray
         }
     }

@@ -1,4 +1,4 @@
-use crate::{PreviewMode, VisGrepApp, get_color_for_file, filter};
+use crate::{PreviewMode, VisGrepApp, get_color_for_file, filter, log_parser};
 use eframe::egui;
 
 impl VisGrepApp {
@@ -504,6 +504,43 @@ impl VisGrepApp {
             });
         });
 
+        // Log level filter controls
+        ui.horizontal(|ui| {
+            ui.label("Level:");
+
+            // Cycle through filter modes with buttons
+            let current_mode = self.tail_state.log_level_filter.display_mode();
+
+            if ui.selectable_label(current_mode == "ALL", "ALL").clicked() {
+                self.tail_state.log_level_filter.active = false;
+            }
+
+            if ui.selectable_label(current_mode == "INFO+", "INFO+").clicked() {
+                self.tail_state.log_level_filter.active = true;
+                self.tail_state.log_level_filter.minimum_level = log_parser::LogLevel::Info;
+            }
+
+            if ui.selectable_label(current_mode == "WARN+", "WARN+").clicked() {
+                self.tail_state.log_level_filter.active = true;
+                self.tail_state.log_level_filter.minimum_level = log_parser::LogLevel::Warn;
+            }
+
+            if ui.selectable_label(current_mode == "ERROR", "ERROR").clicked() {
+                self.tail_state.log_level_filter.active = true;
+                self.tail_state.log_level_filter.minimum_level = log_parser::LogLevel::Error;
+            }
+
+            ui.separator();
+
+            // Checkbox for showing unknown level lines
+            if ui.checkbox(&mut self.tail_state.log_level_filter.show_unknown, "Show UNKNOWN")
+                .on_hover_text("Show lines without detectable log level")
+                .changed()
+            {
+                // Checkbox state updated automatically
+            }
+        });
+
         ui.separator();
 
         // Output area - use all available space
@@ -538,12 +575,20 @@ impl VisGrepApp {
                                     &file.display_name
                                 )
                             });
-                            
+
                             if !should_show {
                                 continue;
                             }
                         }
-                        
+
+                        // Check if this line should be visible based on log level filter
+                        if !self.tail_state.log_level_filter.should_show_line(
+                            &log_line.content,
+                            &self.log_detector
+                        ) {
+                            continue;
+                        }
+
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 4.0;
 
@@ -563,26 +608,36 @@ impl VisGrepApp {
                             let color = get_color_for_file(&log_line.source_file);
                             ui.colored_label(color, format!("[{}]", log_line.source_file));
 
-                            // Content
-                            ui.label(&log_line.content);
+                            // Content with log level coloring
+                            let detected_level = self.log_detector.detect(&log_line.content);
+                            let level_color = self.config.log_format.get_color_scheme().get_color(detected_level);
+                            ui.colored_label(level_color, &log_line.content);
                         });
                     }
 
                     // Check if we're showing nothing due to filtering
-                    let visible_count = if is_filtered {
-                        self.tail_state.output_buffer.iter().filter(|log_line| {
-                            self.tail_state.files.iter().any(|file| {
+                    let visible_count = self.tail_state.output_buffer.iter().filter(|log_line| {
+                        // Check tree filter
+                        if is_filtered {
+                            let tree_visible = self.tail_state.files.iter().any(|file| {
                                 file.display_name == log_line.source_file &&
                                 filter::tree::is_file_visible(
                                     &self.tail_state.tree_filter,
                                     &file.path.to_string_lossy(),
                                     &file.display_name
                                 )
-                            })
-                        }).count()
-                    } else {
-                        self.tail_state.output_buffer.len()
-                    };
+                            });
+                            if !tree_visible {
+                                return false;
+                            }
+                        }
+
+                        // Check log level filter
+                        self.tail_state.log_level_filter.should_show_line(
+                            &log_line.content,
+                            &self.log_detector
+                        )
+                    }).count();
                     
                     if visible_count == 0 {
                         if is_filtered && !self.tail_state.output_buffer.is_empty() {
@@ -900,6 +955,16 @@ impl VisGrepApp {
                     ms if ms < 2000 => 2000,
                     _ => 5000, // Maximum 5000ms (0.2 updates/sec)
                 };
+            }
+
+            // L - cycle log level filter (ALL -> INFO+ -> WARN+ -> ERROR -> ALL)
+            if i.key_pressed(egui::Key::L) && !i.modifiers.shift {
+                self.tail_state.log_level_filter.cycle_mode();
+            }
+
+            // Shift+L - cycle log level filter backwards (ALL -> ERROR -> WARN+ -> INFO+ -> ALL)
+            if i.key_pressed(egui::Key::L) && i.modifiers.shift {
+                self.tail_state.log_level_filter.cycle_mode_backwards();
             }
         });
         

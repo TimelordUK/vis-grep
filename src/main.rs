@@ -302,6 +302,7 @@ struct TailState {
     filter_pattern: String,
     preview_filter: filter::PreviewFilter,
     tree_filter: filter::TreeFilter,
+    log_level_filter: filter::LogLevelFilter,
 
     // Polling
     last_poll_time: Instant,
@@ -344,6 +345,7 @@ impl TailState {
             filter_pattern: String::new(),
             preview_filter: filter::PreviewFilter::new(),
             tree_filter: filter::TreeFilter::new(),
+            log_level_filter: filter::LogLevelFilter::new(),
             last_poll_time: Instant::now(),
             poll_interval_ms: 250,
             total_lines_received: 0,

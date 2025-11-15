@@ -1,7 +1,7 @@
 use regex::Regex;
 use once_cell::sync::Lazy;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LogLevel {
     Trace,
     Debug,
