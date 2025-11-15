@@ -858,9 +858,10 @@ impl VisGrepApp {
                 ui.separator();
 
                 // Filter input UI
+                let mut scroll_to_match = false;
                 if filter::preview::render_filter_input(ui, &mut self.tail_state.preview_filter) {
                     // Filter changed, update matches
-                    filter::preview::update_filter_matches(
+                    scroll_to_match = filter::preview::update_filter_matches(
                         &mut self.tail_state.preview_filter,
                         &self.tail_state.preview_content
                     );
@@ -883,7 +884,7 @@ impl VisGrepApp {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
-                        
+
                         // Apply custom font size
                         let font_id = egui::FontId::new(self.tail_state.font_size, egui::FontFamily::Monospace);
                         ui.style_mut().text_styles.insert(egui::TextStyle::Monospace, font_id);
@@ -897,13 +898,26 @@ impl VisGrepApp {
                             );
                         } else {
                             let filter = &self.tail_state.preview_filter;
-                            
+
                             for (line_idx, line) in
                                 self.tail_state.preview_content.iter().enumerate()
                             {
                                 let is_match = filter.match_lines.contains(&line_idx);
                                 let is_current = filter.current_match_line() == Some(line_idx);
-                                
+
+                                // If we should scroll to this match, make it visible
+                                if scroll_to_match && is_current {
+                                    let line_height = self.tail_state.font_size + 4.0;
+                                    let target_y = line_idx as f32 * line_height;
+                                    ui.scroll_to_rect(
+                                        egui::Rect::from_min_size(
+                                            egui::pos2(0.0, target_y),
+                                            egui::vec2(100.0, line_height)
+                                        ),
+                                        Some(egui::Align::Center)
+                                    );
+                                }
+
                                 let color_scheme = self.config.log_format.get_color_scheme();
                                 filter::preview::render_filtered_line(
                                     ui,

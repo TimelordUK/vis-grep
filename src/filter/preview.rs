@@ -153,23 +153,27 @@ pub fn handle_filter_navigation(filter: &mut PreviewFilter, key: egui::Key, shif
     }
 }
 
-pub fn update_filter_matches(filter: &mut PreviewFilter, lines: &[String]) {
+pub fn update_filter_matches(filter: &mut PreviewFilter, lines: &[String]) -> bool {
     filter.match_lines.clear();
-    
+
     if !filter.active || filter.query.is_empty() {
-        return;
+        filter.current_match = None;
+        return false;
     }
-    
+
     for (idx, line) in lines.iter().enumerate() {
         if filter.matches_line(line) {
             filter.match_lines.push(idx);
         }
     }
-    
-    // Reset to first match if current is invalid
-    if let Some(current) = filter.current_match {
-        if current >= filter.match_lines.len() {
-            filter.current_match = if filter.match_lines.is_empty() { None } else { Some(0) };
-        }
-    }
+
+    // Set to first match if we have matches, or None if no matches
+    filter.current_match = if filter.match_lines.is_empty() {
+        None
+    } else {
+        Some(0)
+    };
+
+    // Return true if we have matches (should scroll to first)
+    !filter.match_lines.is_empty()
 }
