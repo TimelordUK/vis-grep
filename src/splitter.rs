@@ -4,16 +4,17 @@
 
 use std::hash::Hash;
 use egui::{CursorIcon, Id, Layout, Pos2, Rect, Rounding, Sense, Ui, Vec2};
+use serde::{Deserialize, Serialize};
 
 /// An axis that a Splitter can use
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub enum SplitterAxis {
     Horizontal,
     Vertical,
 }
 
 /// The internal data used by a splitter. Stored into memory
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SplitterData {
     axis: SplitterAxis,
     pos: f32,
@@ -55,11 +56,11 @@ impl Splitter {
     /// Show the splitter and fill it with content.
     /// The callback receives two UIs - one for each side of the split
     pub fn show(self, ui: &mut Ui, add_contents: impl FnOnce(&mut Ui, &mut Ui)) {
-        let mut data = if let Some(d) = ui.memory(|mem| mem.data.get_temp(self.id)) {
-            d
-        } else {
-            self.data.clone()
-        };
+        // Load persisted data (falls back to default if not found)
+        let mut data: SplitterData = ui.data_mut(|d| {
+            d.get_persisted(self.id)
+                .unwrap_or_else(|| self.data.clone())
+        });
 
         let sep_size = 10.0;
         let sep_stroke = 2.0;
@@ -155,9 +156,9 @@ impl Splitter {
         let max_pos = (1.0 - min_pos).max(0.0);
         data.pos = data.pos.clamp(min_pos, max_pos);
 
-        ui.memory_mut(|mem| {
-            mem.data.insert_temp(self.id, data);
-        })
+        ui.data_mut(|d| {
+            d.insert_persisted(self.id, data);
+        });
     }
 }
 

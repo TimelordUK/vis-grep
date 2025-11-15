@@ -854,6 +854,11 @@ impl eframe::App for VisGrepApp {
             ctx.request_repaint();
         }
     }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // egui will automatically save persisted memory when this is called
+        log::info!("Application exiting, persisted data will be saved");
+    }
 }
 
 impl VisGrepApp {
@@ -2015,10 +2020,23 @@ fn main() -> eframe::Result<()> {
 
     info!("VisGrep starting in {:?} mode...", startup_config.mode);
 
+    // Set up persistence path for window size and splitter positions
+    let persistence_path = if let Some(config_path) = Config::config_path() {
+        let path = config_path.parent()
+            .map(|p| p.join("app_state.ron"));
+        if let Some(ref p) = path {
+            info!("Persistence path: {:?}", p);
+        }
+        path
+    } else {
+        None
+    };
+
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 900.0])
             .with_title("VisGrep - Fast Search & Tail Tool"),
+        persistence_path,
         ..Default::default()
     };
 
