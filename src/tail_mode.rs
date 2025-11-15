@@ -928,16 +928,6 @@ impl VisGrepApp {
                     });
                 }
 
-                // Content area
-                // Handle goto line scrolling
-                if let Some(target_line) = self.tail_state.goto_line_target {
-                    // Calculate scroll offset to center the target line
-                    let line_height = self.tail_state.font_size + 4.0;
-                    let target_y = target_line as f32 * line_height;
-                    self.tail_state.preview_scroll_offset = target_y;
-                    self.tail_state.goto_line_target = None;
-                }
-
                 // Content area - use all available space
                 let scroll_area = if self.tail_state.preview_mode == PreviewMode::Following {
                     egui::ScrollArea::both()
@@ -986,6 +976,23 @@ impl VisGrepApp {
                                         ),
                                         Some(egui::Align::Center)
                                     );
+                                }
+
+                                // If we should scroll to goto line target, make it visible
+                                if let Some(target_line) = self.tail_state.goto_line_target {
+                                    if line_idx == target_line {
+                                        let line_height = self.tail_state.font_size + 4.0;
+                                        let target_y = line_idx as f32 * line_height;
+                                        ui.scroll_to_rect(
+                                            egui::Rect::from_min_size(
+                                                egui::pos2(0.0, target_y),
+                                                egui::vec2(100.0, line_height)
+                                            ),
+                                            Some(egui::Align::Center)
+                                        );
+                                        // Clear the target after scrolling
+                                        self.tail_state.goto_line_target = None;
+                                    }
                                 }
 
                                 let color_scheme = self.config.log_format.get_color_scheme();
