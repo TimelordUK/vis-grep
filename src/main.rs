@@ -19,6 +19,7 @@ mod filter;
 mod log_parser;
 mod widgets;
 mod bookmark_manager;
+mod buffer_window;
 
 use config::Config;
 use input_handler::{InputHandler, NavigationCommand};
@@ -27,6 +28,8 @@ use search::{SearchEngine, SearchResult};
 use splitter::{Splitter, SplitterAxis};
 use tail_layout::TailLayout;
 use theme::Theme;
+use bookmark_manager::BookmarkManager;
+use buffer_window::BufferWindow;
 
 // ============================================================================
 // Command-Line Arguments
@@ -326,7 +329,7 @@ struct TailState {
     preview_mode: PreviewMode,
     preview_scroll_offset: f32,
     preview_follow_lines: usize,
-    preview_content: Vec<String>,
+    preview_buffer: BufferWindow,  // Encapsulates preview_content and buffer tracking
     preview_needs_reload: bool,
 
     // Text viewer state (encapsulates preview display, navigation, filtering, goto)
@@ -341,6 +344,9 @@ struct TailState {
     // UI state
     control_panel_height: f32,
     max_filename_width: f32,  // Cached maximum filename width for alignment
+
+    // Bookmark management for tail mode
+    bookmark_manager: BookmarkManager,
 }
 
 impl TailState {
@@ -362,16 +368,17 @@ impl TailState {
             lines_dropped: 0,
             max_lines_per_poll: 100,
             preview_selected_file: None,
-            preview_mode: PreviewMode::Following,
+            preview_mode: PreviewMode::Following,  // Default to Following (last N lines)
             preview_scroll_offset: 0.0,
             preview_follow_lines: 1000,
-            preview_content: Vec::new(),
+            preview_buffer: BufferWindow::empty(),
             preview_needs_reload: false,
             text_viewer_state: widgets::TextViewerState::new(config.ui.font_size),
             font_size: config.ui.font_size,
             layout: None,
             control_panel_height: 250.0,
             max_filename_width: 200.0,  // Initial default, will be recalculated
+            bookmark_manager: BookmarkManager::new(),
         }
     }
 
@@ -664,9 +671,9 @@ impl VisGrepApp {
             self.propagate_activity_to_group(&group_id, active);
         }
 
-        // Reload preview if needed
+        // Reload preview if needed (auto update from file polling)
         if self.tail_state.preview_needs_reload {
-            self.reload_tail_preview();
+            self.reload_tail_preview_impl(true);  // auto_update = true
         }
     }
     
@@ -677,59 +684,112 @@ impl VisGrepApp {
     }
 
     fn reload_tail_preview(&mut self) {
+        self.reload_tail_preview_impl(false)
+    }
+
+    fn reload_tail_preview_impl(&mut self, auto_update: bool) {
         if let Some(file_idx) = self.tail_state.preview_selected_file {
             if file_idx < self.tail_state.files.len() {
                 let file = &self.tail_state.files[file_idx];
+                let file_path = file.path.clone();
 
-                match self.read_file_for_preview(&file.path) {
-                    Ok(lines) => {
-                        self.tail_state.preview_content = lines;
+                match self.read_file_for_preview(&file_path) {
+                    Ok(buffer) => {
+                        self.tail_state.preview_buffer = buffer;
                         self.tail_state.preview_needs_reload = false;
-                        
+
                         // Update filter matches if filter is active
                         if self.tail_state.preview_filter.active {
                             filter::preview::update_filter_matches(
                                 &mut self.tail_state.preview_filter,
-                                &self.tail_state.preview_content
+                                &self.tail_state.preview_buffer.lines
                             );
+                        }
+
+                        // Only prune bookmarks during automatic updates in Following mode
+                        // Don't prune when manually switching files or navigating to bookmarks
+                        if auto_update && self.tail_state.preview_mode == PreviewMode::Following {
+                            // Get all marks for this file
+                            let file_marks = self.tail_state.bookmark_manager.get_file_marks(&file_path);
+
+                            // Check which ones are outside the current buffer
+                            let mut marks_to_remove = Vec::new();
+                            for (mark_char, bookmark) in file_marks {
+                                if !self.tail_state.preview_buffer.contains_absolute_line(bookmark.absolute_line_number) {
+                                    marks_to_remove.push(mark_char);
+                                    info!("⚠️  Mark '{}' at {}:{} is outside current buffer ({}..{}), will prune",
+                                        mark_char,
+                                        bookmark.file_path.display(),
+                                        bookmark.absolute_line_number,
+                                        self.tail_state.preview_buffer.start_line,
+                                        self.tail_state.preview_buffer.end_line()
+                                    );
+                                }
+                            }
+
+                            // Prune marks that slid out of the buffer
+                            for mark_char in marks_to_remove {
+                                if let Some(removed_bookmark) = self.tail_state.bookmark_manager.remove_mark(mark_char) {
+                                    info!("🗑️  Pruned stale mark '{}' from {}:{} (slid outside Following buffer range {}..{})",
+                                        mark_char,
+                                        removed_bookmark.file_path.display(),
+                                        removed_bookmark.absolute_line_number,
+                                        self.tail_state.preview_buffer.start_line,
+                                        self.tail_state.preview_buffer.end_line()
+                                    );
+                                }
+                            }
+                        } else if !auto_update {
+                            info!("ℹ️  Manual reload - not pruning bookmarks");
                         }
                     }
                     Err(e) => {
                         info!("Error loading preview for {}: {}", file.display_name, e);
-                        self.tail_state.preview_content = vec![format!("Error: {}", e)];
+                        self.tail_state.preview_buffer = BufferWindow::new(
+                            vec![format!("Error: {}", e)],
+                            0,
+                            1
+                        );
                     }
                 }
             }
         }
     }
 
-    fn read_file_for_preview(&self, path: &PathBuf) -> std::io::Result<Vec<String>> {
+    fn read_file_for_preview(&self, path: &PathBuf) -> std::io::Result<BufferWindow> {
         use std::io::{BufRead, BufReader};
 
-        if self.tail_state.preview_mode == PreviewMode::Following {
-            // Read last N lines efficiently
-            let file = File::open(path)?;
-            let reader = BufReader::new(file);
+        // Always read last N lines (sliding window)
+        // Paused mode just stops auto-updating, doesn't load entire file
+        let file = File::open(path)?;
+        let reader = BufReader::new(file);
 
-            let mut lines: VecDeque<String> =
-                VecDeque::with_capacity(self.tail_state.preview_follow_lines);
+        let mut lines: VecDeque<String> =
+            VecDeque::with_capacity(self.tail_state.preview_follow_lines);
+        let mut total_line_count = 0;
 
-            for line in reader.lines() {
-                if let Ok(line_str) = line {
-                    if lines.len() >= self.tail_state.preview_follow_lines {
-                        lines.pop_front();
-                    }
-                    lines.push_back(line_str);
+        for line in reader.lines() {
+            if let Ok(line_str) = line {
+                total_line_count += 1;
+                if lines.len() >= self.tail_state.preview_follow_lines {
+                    lines.pop_front();
                 }
+                lines.push_back(line_str);
             }
-
-            Ok(lines.into_iter().collect())
-        } else {
-            // Read entire file for paused mode
-            let file = File::open(path)?;
-            let reader = BufReader::new(file);
-            reader.lines().collect()
         }
+
+        // Calculate where the buffer starts (0-indexed)
+        let buffer_start_line = if total_line_count > self.tail_state.preview_follow_lines {
+            total_line_count - self.tail_state.preview_follow_lines
+        } else {
+            0
+        };
+
+        Ok(BufferWindow::new(
+            lines.into_iter().collect(),
+            buffer_start_line,
+            total_line_count
+        ))
     }
 }
 
@@ -737,7 +797,13 @@ impl eframe::App for VisGrepApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Apply theme
         self.theme.apply(ctx);
-        
+
+        // For tail mode, handle TextViewer navigation FIRST
+        // This updates cursor_line before we process bookmark commands
+        if self.mode == AppMode::Tail {
+            self.handle_tail_mode_navigation(ctx);
+        }
+
         // Process keyboard input and handle navigation commands
         if let Some(command) = self.input_handler.process_input(ctx) {
             self.handle_navigation_command(command);
@@ -859,8 +925,7 @@ impl eframe::App for VisGrepApp {
             AppMode::Tail => {
                 // Poll files for updates
                 self.poll_tail_files();
-                // Handle tail mode navigation
-                self.handle_tail_mode_navigation(ctx);
+                // Note: tail mode navigation handled earlier in update()
             },
             AppMode::Test => {
                 // No background tasks for test mode
@@ -986,6 +1051,22 @@ impl VisGrepApp {
     }
 
     fn set_mark(&mut self, ch: char) {
+        match self.mode {
+            AppMode::Grep => self.set_grep_mark(ch),
+            AppMode::Tail => self.set_tail_mark(ch),
+            _ => {}
+        }
+    }
+
+    fn goto_mark(&mut self, ch: char) {
+        match self.mode {
+            AppMode::Grep => self.goto_grep_mark(ch),
+            AppMode::Tail => self.goto_tail_mark(ch),
+            _ => {}
+        }
+    }
+
+    fn set_grep_mark(&mut self, ch: char) {
         if let Some(result_id) = self.grep_state.selected_result {
             self.marks.insert(ch, result_id);
             info!("Set mark '{}' at result {}", ch, result_id);
@@ -994,7 +1075,7 @@ impl VisGrepApp {
         }
     }
 
-    fn goto_mark(&mut self, ch: char) {
+    fn goto_grep_mark(&mut self, ch: char) {
         if let Some(&result_id) = self.marks.get(&ch) {
             let file_idx = result_id / 10000;
             let match_idx = result_id % 10000;
@@ -1011,6 +1092,140 @@ impl VisGrepApp {
             }
         } else {
             info!("Mark '{}' not set", ch);
+        }
+    }
+
+    fn set_tail_mark(&mut self, ch: char) {
+        // Only set marks when viewing a file in tail mode
+        if let Some(file_idx) = self.tail_state.preview_selected_file {
+            if file_idx < self.tail_state.files.len() {
+                let file_path = self.tail_state.files[file_idx].path.clone();
+
+                // Get current line - prefer last_navigated_line (from :goto or previous marks)
+                // Otherwise use cursor_line (updated by TextViewer)
+                let relative_line = self.tail_state.text_viewer_state.last_navigated_line
+                    .or(Some(self.tail_state.text_viewer_state.cursor_line))
+                    .unwrap_or_else(|| {
+                        // Fallback: estimate from scroll offset
+                        let line_height = self.tail_state.text_viewer_state.font_size + 4.0;
+                        (self.tail_state.text_viewer_state.scroll_offset / line_height) as usize
+                    });
+
+                // Convert to absolute line number using BufferWindow
+                let absolute_line = self.tail_state.preview_buffer
+                    .relative_to_absolute(relative_line)
+                    .unwrap_or(relative_line);
+
+                // Get the line content
+                let line_content = self.tail_state.preview_buffer
+                    .get_line(relative_line)
+                    .cloned()
+                    .unwrap_or_default();
+
+                self.tail_state.bookmark_manager.set_mark(
+                    ch,
+                    file_path.clone(),
+                    absolute_line,
+                    line_content.clone()
+                );
+
+                info!("📌 SET TAIL BOOKMARK '{}' → File: {}, Relative Line: {}, Absolute Line: {}, Buffer Start: {}, Content: '{}'",
+                    ch,
+                    file_path.display(),
+                    relative_line,
+                    absolute_line,
+                    self.tail_state.preview_buffer.start_line,
+                    line_content.chars().take(50).collect::<String>()
+                );
+
+                // Show all current bookmarks
+                let all_marks = self.tail_state.bookmark_manager.get_all_marks();
+                info!("📚 ACTIVE BOOKMARKS ({}): {:?}",
+                    all_marks.len(),
+                    all_marks.iter().map(|(c, b)| format!("'{}' → {}:{}", c, b.file_path.display(), b.absolute_line_number)).collect::<Vec<_>>()
+                );
+            }
+        } else {
+            info!("No file selected in tail mode to mark");
+        }
+    }
+
+    fn goto_tail_mark(&mut self, ch: char) {
+        info!("🔍 GOTO TAIL BOOKMARK '{}' - Checking bookmark manager...", ch);
+
+        // Show all current bookmarks for debugging
+        let all_marks = self.tail_state.bookmark_manager.get_all_marks();
+        info!("📚 AVAILABLE BOOKMARKS: {:?}",
+            all_marks.iter().map(|(c, b)| format!("'{}' → {}:{}", c, b.file_path.display(), b.absolute_line_number)).collect::<Vec<_>>()
+        );
+
+        // Clone bookmark data to avoid borrow conflicts
+        if let Some(bookmark) = self.tail_state.bookmark_manager.get_mark(ch).cloned() {
+            info!("✅ Found bookmark '{}' at {}:{}", ch, bookmark.file_path.display(), bookmark.absolute_line_number);
+
+            // Find the file index for this bookmark
+            let file_idx = self.tail_state.files.iter()
+                .position(|f| f.path == bookmark.file_path);
+
+            if let Some(idx) = file_idx {
+                info!("📂 Switching to file index {} ({})", idx, bookmark.file_path.display());
+
+                // Switch to the bookmarked file
+                let previous_file = self.tail_state.preview_selected_file;
+                self.tail_state.preview_selected_file = Some(idx);
+                self.tail_state.preview_needs_reload = true;
+                self.tail_state.preview_mode = PreviewMode::Paused;
+
+                // Force reload NOW if we're switching files
+                if previous_file != Some(idx) {
+                    info!("🔄 File changed (from {:?} to {}), forcing reload", previous_file, idx);
+                    self.reload_tail_preview();
+                }
+
+                // Try to convert absolute line to relative position using BufferWindow
+                if let Some(relative_line) = self.tail_state.preview_buffer
+                    .absolute_to_relative(bookmark.absolute_line_number) {
+                    info!("✅ Bookmark is in buffer range! Absolute: {}, Buffer Start: {}, Relative: {}",
+                        bookmark.absolute_line_number,
+                        self.tail_state.preview_buffer.start_line,
+                        relative_line
+                    );
+
+                    // Navigate to the bookmarked line
+                    self.tail_state.text_viewer_state.cursor_line = relative_line;
+                    self.tail_state.text_viewer_state.goto_line_target = Some(relative_line);
+                    self.tail_state.text_viewer_state.last_navigated_line = Some(relative_line);
+                    self.tail_state.text_viewer_state.view_mode = widgets::ViewMode::Paused;
+
+                    // CRITICAL: Calculate scroll position directly based on line number
+                    // This avoids issues with scroll_to_rect and stale layout state
+                    let line_height = self.tail_state.text_viewer_state.font_size + 4.0;
+                    let target_scroll = (relative_line as f32 * line_height).max(0.0);
+                    self.tail_state.text_viewer_state.scroll_offset = target_scroll;
+                    info!("📍 Set scroll_offset to {} (line {} * line_height {})", target_scroll, relative_line, line_height);
+
+                    info!("🎯 Jumped to tail mark '{}' at {}:{} (relative line {} in buffer)",
+                        ch,
+                        bookmark.file_path.display(),
+                        bookmark.absolute_line_number,
+                        relative_line
+                    );
+                } else {
+                    info!("⚠️  Mark '{}' at absolute line {} is outside current buffer (buffer: {}..{})",
+                        ch,
+                        bookmark.absolute_line_number,
+                        self.tail_state.preview_buffer.start_line,
+                        self.tail_state.preview_buffer.end_line()
+                    );
+                }
+            } else {
+                info!("❌ Mark '{}' file not found in current tail session: {}",
+                    ch,
+                    bookmark.file_path.display()
+                );
+            }
+        } else {
+            info!("❌ Tail mark '{}' not set", ch);
         }
     }
 

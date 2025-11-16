@@ -886,6 +886,49 @@ impl VisGrepApp {
 
                 ui.separator();
 
+                // Bookmarks panel - show active bookmarks
+                let all_marks = self.tail_state.bookmark_manager.get_all_marks();
+                if !all_marks.is_empty() {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("📚 Bookmarks:").strong());
+
+                        for (mark_char, bookmark) in all_marks {
+                            let is_current_file = bookmark.file_path == file_path;
+                            let filename = bookmark.file_path.file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("?");
+
+                            let label_text = format!("'{}' {}:{}",
+                                mark_char,
+                                filename,
+                                bookmark.absolute_line_number + 1  // 1-indexed for display
+                            );
+
+                            let color = if is_current_file {
+                                egui::Color32::from_rgb(100, 255, 100) // Green for current file
+                            } else {
+                                egui::Color32::from_rgb(200, 200, 200) // Gray for other files
+                            };
+
+                            let response = ui.label(
+                                egui::RichText::new(label_text)
+                                    .color(color)
+                                    .small()
+                            );
+
+                            // Tooltip with full info
+                            response.on_hover_text(format!(
+                                "Mark '{}'\nFile: {}\nLine: {}\nContent: {}",
+                                mark_char,
+                                bookmark.file_path.display(),
+                                bookmark.absolute_line_number + 1,
+                                bookmark.line_content.chars().take(80).collect::<String>()
+                            ));
+                        }
+                    });
+                    ui.separator();
+                }
+
                 // Sync TextViewerState with TailState before rendering
                 self.tail_state.text_viewer_state.view_mode = match self.tail_state.preview_mode {
                     PreviewMode::Following => widgets::ViewMode::Following,
@@ -899,7 +942,7 @@ impl VisGrepApp {
                 let color_scheme = self.config.log_format.get_color_scheme();
                 let viewer = widgets::TextViewer::new(
                     &mut self.tail_state.text_viewer_state,
-                    &self.tail_state.preview_content,
+                    &self.tail_state.preview_buffer.lines,
                     &self.log_detector,
                     &color_scheme,
                 );
@@ -982,15 +1025,24 @@ impl VisGrepApp {
             // Use TextViewer's input handler for all navigation
             widgets::TextViewer::handle_input(
                 &mut self.tail_state.text_viewer_state,
-                &self.tail_state.preview_content,
+                &self.tail_state.preview_buffer.lines,
                 ctx
             );
 
             // Sync state back from text_viewer_state
+            let old_mode = self.tail_state.preview_mode;
             self.tail_state.preview_mode = match self.tail_state.text_viewer_state.view_mode {
                 widgets::ViewMode::Following => PreviewMode::Following,
                 widgets::ViewMode::Paused => PreviewMode::Paused,
             };
+
+            // If mode changed, reload preview to get appropriate buffer
+            if old_mode != self.tail_state.preview_mode {
+                log::info!("Preview mode changed from {:?} to {:?}, reloading preview",
+                    old_mode, self.tail_state.preview_mode);
+                self.tail_state.preview_needs_reload = true;
+            }
+
             self.tail_state.preview_scroll_offset = self.tail_state.text_viewer_state.scroll_offset;
             self.tail_state.preview_filter = self.tail_state.text_viewer_state.filter.clone();
 

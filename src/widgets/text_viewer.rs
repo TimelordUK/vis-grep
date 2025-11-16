@@ -34,7 +34,7 @@ pub struct TextViewerState {
     /// Goto line input buffer
     pub goto_line_input: String,
 
-    /// Target line to scroll to (0-indexed)
+    /// Target line to scroll to (0-indexed, relative to buffer)
     pub goto_line_target: Option<usize>,
 
     /// Flag to scroll to bottom on next frame
@@ -48,6 +48,10 @@ pub struct TextViewerState {
 
     /// Track the last line we explicitly navigated to (for mark setting)
     pub last_navigated_line: Option<usize>,
+
+    /// Current cursor line (0-indexed, relative to buffer start)
+    /// Used for bookmark integration with tail mode
+    pub cursor_line: usize,
 
     /// Input handler for vim-style navigation
     pub input_handler: InputHandler,
@@ -67,6 +71,7 @@ impl TextViewerState {
             scroll_to_current_match: false,
             marks: HashMap::new(),
             last_navigated_line: None,
+            cursor_line: 0,
             input_handler: InputHandler::new(),
         }
     }
@@ -264,11 +269,15 @@ impl<'a> TextViewer<'a> {
                 if (response.lost_focus() && enter_pressed) || enter_pressed {
                     if let Ok(line_num) = self.state.goto_line_input.parse::<usize>() {
                         if line_num > 0 && line_num <= self.content.len() {
-                            let target = line_num - 1; // Convert to 0-indexed
-                            info!("Goto line: user entered {}, setting target to {}", line_num, target);
+                            // Navigate to line in the current buffer (1-indexed display -> 0-indexed internal)
+                            let target = line_num - 1;
+                            info!("Goto line: user entered {}, navigating to buffer line {} (displayed as line {})",
+                                line_num, target, target + 1);
                             self.state.goto_line_target = Some(target);
                             self.state.last_navigated_line = Some(target);
                             self.state.view_mode = ViewMode::Paused;
+                        } else if line_num > self.content.len() {
+                            info!("Line {} is beyond buffer end (buffer has {} lines)", line_num, self.content.len());
                         }
                     }
                     self.state.goto_line_active = false;
@@ -372,31 +381,23 @@ impl<'a> TextViewer<'a> {
                             handled = true;
                         }
                     }
-                    NavigationCommand::SetMark(mark_char) => {
-                        // ma, mb, etc - set a mark at current line
-                        // Prefer last_navigated_line if set (from :goto or 'mark navigation)
-                        // Otherwise estimate from scroll_offset
+                    NavigationCommand::SetMark(_mark_char) => {
+                        // NOTE: Marks are now handled by the parent app's BookmarkManager
+                        // for tail mode, NOT by TextViewer's local marks.
+                        // TextViewer just updates cursor position for bookmark integration.
                         let mark_line = if let Some(line) = state.last_navigated_line {
                             line
                         } else {
                             let line_height = state.font_size + 4.0;
                             (state.scroll_offset / line_height) as usize
                         };
-                        state.marks.insert(mark_char, mark_line);
-                        info!("Set mark '{}' at line {} (1-indexed: {})", mark_char, mark_line, mark_line + 1);
-                        handled = true;
+                        state.cursor_line = mark_line; // Update cursor position for parent
+                        // Don't set handled = true, let parent handle the mark
                     }
-                    NavigationCommand::GotoMark(mark_char) => {
-                        // 'a, 'b, etc - go to a mark
-                        if let Some(&line_num) = state.marks.get(&mark_char) {
-                            info!("Going to mark '{}' at line {}", mark_char, line_num);
-                            state.goto_line_target = Some(line_num);
-                            state.last_navigated_line = Some(line_num);
-                            state.view_mode = ViewMode::Paused;
-                            handled = true;
-                        } else {
-                            info!("Mark '{}' not set", mark_char);
-                        }
+                    NavigationCommand::GotoMark(_mark_char) => {
+                        // NOTE: Mark navigation is now handled by the parent app's BookmarkManager
+                        // for tail mode. TextViewer doesn't handle goto locally anymore.
+                        // Don't set handled = true, let parent handle the navigation
                     }
                     _ => {
                         // Other commands not applicable to text viewer
