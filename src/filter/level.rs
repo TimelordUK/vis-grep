@@ -150,7 +150,7 @@ mod tests {
     #[test]
     fn test_filter_inactive() {
         let filter = LogLevelFilter::new();
-        let detector = LogLevelDetector::new(vec![]);
+        let detector = LogLevelDetector::new();
 
         // When inactive, all lines should be shown
         assert!(filter.should_show_line("[ERROR] test", &detector));
@@ -164,7 +164,7 @@ mod tests {
         filter.active = true;
         filter.minimum_level = LogLevel::Error;
 
-        let detector = LogLevelDetector::new(vec![]);
+        let detector = LogLevelDetector::new();
 
         // Should show errors and fatal
         assert!(filter.should_show_line("[ERROR] test", &detector));

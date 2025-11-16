@@ -18,6 +18,7 @@ mod theme;
 mod filter;
 mod log_parser;
 mod widgets;
+mod bookmark_manager;
 
 use config::Config;
 use input_handler::{InputHandler, NavigationCommand};
