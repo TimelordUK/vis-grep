@@ -1,7 +1,7 @@
 use arboard::Clipboard;
 use clap::{Parser, Subcommand};
 use eframe::egui;
-use log::{info, warn};
+use log::{debug, info, warn};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -663,6 +663,7 @@ impl VisGrepApp {
 
     fn poll_tail_files(&mut self) {
         if self.tail_state.paused_all {
+            debug!("📂 poll_tail_files: Skipping - paused_all is true");
             return;
         }
 
@@ -671,8 +672,12 @@ impl VisGrepApp {
 
         // Poll at configured interval
         if elapsed < std::time::Duration::from_millis(self.tail_state.poll_interval_ms) {
+            debug!("📂 poll_tail_files: Skipping - not enough time elapsed ({:?} < {}ms)",
+                   elapsed, self.tail_state.poll_interval_ms);
             return;
         }
+
+        debug!("📂 poll_tail_files: Starting poll cycle");
 
         self.tail_state.last_poll_time = now;
 
