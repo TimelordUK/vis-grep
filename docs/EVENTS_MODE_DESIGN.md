@@ -159,11 +159,53 @@ struct CapturedEvent {
 └──────────────────┴──────────────────────────────────┘
 ```
 
+### Event Adapter Pattern
+
+The `EventAdapter` is a **testable, reusable component** that sits between FileWatchManager and Events UI:
+
+```rust
+/// Adapter that processes FileWatchManager updates and extracts structured events
+pub struct EventAdapter {
+    /// Event patterns to match against
+    patterns: Vec<EventPattern>,
+
+    /// Events currently being captured (pending multi-line completion)
+    pending_events: HashMap<PathBuf, PendingEvent>,
+
+    /// Completed events ready for display
+    captured_events: VecDeque<CapturedEvent>,
+    max_events: usize,
+}
+
+impl EventAdapter {
+    /// Process new lines from FileWatchManager
+    pub fn process_update(&mut self, file_path: PathBuf, update: FileUpdate) -> Vec<CapturedEvent> {
+        match update {
+            FileUpdate::NewLines { lines, start_line } => {
+                self.process_new_lines(file_path, lines, start_line)
+            }
+            FileUpdate::Truncated => {
+                // Clear pending events for this file
+                self.pending_events.remove(&file_path);
+                vec![]
+            }
+            _ => vec![],
+        }
+    }
+}
+```
+
+**Key Features**:
+- ✅ Unit testable without UI
+- ✅ Handles multi-line events across update boundaries
+- ✅ Smart context capture (e.g., JSON/XML payloads)
+- ✅ Ringbuffer to limit memory
+
 ### Event Capture Logic
 
 ```rust
-impl EventsMode {
-    fn process_new_lines(&mut self, file: &PathBuf, lines: Vec<String>, start_line: usize) {
+impl EventAdapter {
+    fn process_new_lines(&mut self, file: &PathBuf, lines: Vec<String>, start_line: usize) -> Vec<CapturedEvent> {
         let mut current_event: Option<(EventPattern, Vec<String>, usize)> = None;
 
         for (offset, line) in lines.iter().enumerate() {
@@ -196,42 +238,101 @@ impl EventsMode {
 }
 ```
 
+### Smart Context Capture
+
+For structured data like JSON/XML, we need to capture the **entire payload**, not just the trigger line:
+
+```rust
+struct EventPattern {
+    name: String,
+    start_regex: Regex,
+    end_regex: Regex,
+    max_lines: usize,
+
+    // NEW: Smart context detection
+    context_type: ContextType,
+}
+
+enum ContextType {
+    /// Match until end_regex
+    RegexBoundary,
+
+    /// Balanced braces: { ... }
+    JsonBraces { indent_aware: bool },
+
+    /// XML tags: <tag>...</tag>
+    XmlTags { tag_name: String },
+
+    /// Fixed line count after trigger
+    FixedLines { count: usize },
+}
+```
+
+**Example: JSON Payload Capture**
+
+```yaml
+events:
+  - name: "JSON API Response"
+    start_pattern: '^\[.*\] RESPONSE: \{'  # Matches: [timestamp] RESPONSE: {
+    end_pattern: '^\[.*\]'                   # Next log line starts
+    max_lines: 200
+    context_type: json_braces
+```
+
+**How it works**:
+1. Trigger line: `[2024-11-17 10:30:00] RESPONSE: {`
+2. Adapter sees `{` → enters JSON capture mode
+3. Tracks brace depth: `{ ... { ... } ... }`
+4. Captures until depth returns to 0 or max_lines
+5. Result: Complete JSON payload in event
+
 ### Integration with Preview
 
 **Reuse existing preview infrastructure!**
 - Click event → Load lines into `preview_buffer: BufferWindow`
-- Use existing TextViewer widget
+- Use existing TextViewer widget with syntax highlighting
 - "Open Location" → Switch to Tail mode, navigate to file + line
 - "Open in Editor" → Use existing `open_file_in_editor(path, line)`
+- JSON/XML events get pretty-printed in preview
 
 ### Phase 1: MVP Implementation
 
-1. **FileWatchManager** (Foundation)
-   - Extract file watching from `TailedFile`
-   - Implement subscribe/notify pattern
-   - Migrate Tail mode to use it
+1. **✅ FileWatchManager** (COMPLETE)
+   - ✅ Centralized file watching with pub/sub
+   - ✅ Subscribe/notify pattern implemented
+   - ✅ Tail mode migrated
+   - ✅ Comprehensive testing and logging
 
-2. **Events Mode Basic**
-   - Add Events tab
-   - Load event patterns from YAML
-   - Capture single-line events first (simpler regex)
-   - Display in list with timestamp
+2. **EventAdapter** (Next Session)
+   - Create `src/event_adapter.rs` module
+   - Implement `EventPattern` with regex matching
+   - Basic event capture (regex boundary only)
+   - Unit tests with mock file updates
 
-3. **Preview Integration**
+3. **Events Mode UI**
+   - Add Events tab to UI
+   - Subscribe to FileWatchManager as `FileSubscriber::Events`
+   - Pass updates to EventAdapter
+   - Display captured events in list
+
+4. **Preview Integration**
    - Click event → show in preview pane
-   - Reuse TextViewer widget
-   - Navigate to source file
+   - Reuse existing BufferWindow + TextViewer
+   - Navigate to source file location
+   - Syntax highlighting for JSON/XML
 
-4. **Multi-line Events**
-   - Implement start/end pattern matching
-   - Handle pending events across updates
-   - Limit event size
+5. **Smart Context Capture**
+   - Implement `ContextType::JsonBraces`
+   - Implement `ContextType::XmlTags`
+   - Balanced bracket tracking
+   - Indent-aware capture
 
-5. **Polish**
+6. **Polish**
+   - Load patterns from YAML configuration
    - Color coding by event type
-   - Filter events by pattern
+   - Filter events by pattern name
    - Export events to file
-   - Clear old events (ringbuffer)
+   - Ringbuffer memory management
 
 ## Benefits of This Approach
 
