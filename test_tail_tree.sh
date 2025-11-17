@@ -220,15 +220,14 @@ trap cleanup EXIT INT TERM
 echo -e "\n${BLUE}Launching vis-grep with tree layout...${NC}"
 echo -e "${BLUE}Press Ctrl+C to stop${NC}\n"
 
-# Build and run vis-grep
-cargo build --release 2>/dev/null || cargo build
+# Build and run vis-grep (use debug build for logging)
+cargo build 2>&1 | tail -3
 
 # Force X11 backend for WSL compatibility
 unset WAYLAND_DISPLAY
 export WINIT_UNIX_BACKEND=x11
 
-if [ -f target/release/vis-grep ]; then
-    ./target/release/vis-grep --tail-layout "$LAYOUT_FILE"
-else
-    ./target/debug/vis-grep --tail-layout "$LAYOUT_FILE"
-fi
+# Set debug logging
+export RUST_LOG=debug
+
+./target/debug/vis-grep --tail-layout "$LAYOUT_FILE"
