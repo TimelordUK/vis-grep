@@ -205,6 +205,10 @@ struct TailedFile {
 
     // Group membership
     group_id: Option<String>,
+    
+    // Error tracking for recovery
+    consecutive_errors: u32,
+    last_error_time: Option<Instant>,
 }
 
 impl TailedFile {
@@ -240,42 +244,95 @@ impl TailedFile {
             total_bytes_read: 0,
             level_counts_since_last_read: HashMap::new(),
             group_id: None,
+            consecutive_errors: 0,
+            last_error_time: None,
         })
     }
 
     fn check_for_updates(&mut self) -> std::io::Result<Vec<String>> {
-        // Re-open file to get fresh metadata
-        let metadata = std::fs::metadata(&self.path)?;
-        let current_size = metadata.len();
-        
-        // Debug output for file rotation detection
-        if current_size < self.last_size {
-            info!("File rotation detected for {}: size decreased from {} to {}", 
-                self.display_name, self.last_size, current_size);
+        // Skip if we're in error backoff period
+        if let Some(last_error) = self.last_error_time {
+            let backoff_duration = std::time::Duration::from_secs(
+                std::cmp::min(60, 2u64.pow(self.consecutive_errors.min(6)))
+            );
+            if last_error.elapsed() < backoff_duration {
+                return Ok(vec![]);
+            }
         }
-
-        if current_size > self.last_size {
-            // File grew - read new content
-            let mut file = File::open(&self.path)?;
-            file.seek(SeekFrom::Start(self.last_position))?;
-
-            let reader = BufReader::new(file);
-            let new_lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
-
-            let bytes_read = current_size - self.last_position;
-            self.total_bytes_read += bytes_read;
-            self.total_lines_read += new_lines.len();
-            self.last_size = current_size;
-            self.last_position = current_size;
-
+        
+        match self.check_for_updates_impl() {
+            Ok(lines) => {
+                // Reset error tracking on success
+                if self.consecutive_errors > 0 {
+                    info!("File {} recovered after {} errors", self.display_name, self.consecutive_errors);
+                    self.consecutive_errors = 0;
+                    self.last_error_time = None;
+                }
+                Ok(lines)
+            }
+            Err(e) => {
+                self.consecutive_errors += 1;
+                self.last_error_time = Some(Instant::now());
+                
+                if self.consecutive_errors == 1 || self.consecutive_errors % 10 == 0 {
+                    info!("Error reading {} (attempt {}): {}", self.display_name, self.consecutive_errors, e);
+                }
+                
+                // Return error only on first attempt, otherwise silently skip
+                if self.consecutive_errors == 1 {
+                    Err(e)
+                } else {
+                    Ok(vec![])
+                }
+            }
+        }
+    }
+    
+    fn check_for_updates_impl(&mut self) -> std::io::Result<Vec<String>> {
+        // For network shares, always try to read from last position
+        // to avoid stale metadata issues
+        let mut file = File::open(&self.path)?;
+        
+        // First, seek to our last known position to see if there's new data
+        file.seek(SeekFrom::Start(self.last_position))?;
+        
+        // Try to read some data
+        let reader = BufReader::new(file);
+        let new_lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
+        
+        if !new_lines.is_empty() {
+            // We got new data, update our position
+            let lines_read = new_lines.len();
+            self.total_lines_read += lines_read;
+            
+            // Update position based on what we actually read
+            // Note: This is approximate but avoids needing to re-seek
+            let approx_bytes: usize = new_lines.iter().map(|l| l.len() + 1).sum();
+            self.last_position += approx_bytes as u64;
+            self.total_bytes_read += approx_bytes as u64;
+            
+            // Update activity tracking
+            self.lines_since_last_read += lines_read;
+            self.last_activity = Instant::now();
+            self.is_active = true;
+            
             Ok(new_lines)
-        } else if current_size < self.last_size {
-            // File was truncated/rotated
-            self.last_position = 0;
-            self.last_size = current_size;
-            Ok(vec!["[FILE TRUNCATED/ROTATED]".to_string()])
         } else {
-            // No change
+            // No new data, but check if file was truncated
+            // Only do this occasionally to reduce network operations
+            if self.last_activity.elapsed() > std::time::Duration::from_secs(10) {
+                if let Ok(metadata) = std::fs::metadata(&self.path) {
+                    let current_size = metadata.len();
+                    if current_size < self.last_size {
+                        info!("File rotation detected for {}: size decreased from {} to {}", 
+                            self.display_name, self.last_size, current_size);
+                        self.last_position = 0;
+                        self.last_size = current_size;
+                        return Ok(vec!["[FILE TRUNCATED/ROTATED]".to_string()]);
+                    }
+                    self.last_size = current_size;
+                }
+            }
             Ok(vec![])
         }
     }
@@ -347,6 +404,9 @@ struct TailState {
 
     // Bookmark management for tail mode
     bookmark_manager: BookmarkManager,
+    
+    // Error tracking
+    file_errors: Vec<String>,
 }
 
 impl TailState {
@@ -355,7 +415,7 @@ impl TailState {
             files: Vec::new(),
             selected_file_index: None,
             output_buffer: VecDeque::new(),
-            max_buffer_lines: 10000,
+            max_buffer_lines: config.ui.max_buffer_lines,
             paused_all: false,
             auto_scroll: true,
             filter_pattern: String::new(),
@@ -379,6 +439,7 @@ impl TailState {
             control_panel_height: 250.0,
             max_filename_width: 200.0,  // Initial default, will be recalculated
             bookmark_manager: BookmarkManager::new(),
+            file_errors: Vec::new(),
         }
     }
 
@@ -387,7 +448,7 @@ impl TailState {
     }
     
     fn add_file_with_group(&mut self, path: PathBuf, group_id: Option<String>) -> Result<(), String> {
-        match TailedFile::new(path) {
+        match TailedFile::new(path.clone()) {
             Ok(mut file) => {
                 info!("Started tailing: {}", file.display_name);
                 file.group_id = group_id;
@@ -395,8 +456,9 @@ impl TailState {
                 Ok(())
             }
             Err(e) => {
-                let msg = format!("Failed to tail file: {}", e);
+                let msg = format!("Failed to tail file '{}': {}", path.display(), e);
                 info!("{}", msg);
+                self.file_errors.push(msg.clone());
                 Err(msg)
             }
         }
@@ -410,23 +472,33 @@ impl TailState {
         if let Some(poll_ms) = layout.settings.poll_interval_ms {
             self.poll_interval_ms = poll_ms;
         }
+        if let Some(buffer_lines) = layout.settings.max_buffer_lines {
+            self.max_buffer_lines = buffer_lines;
+        }
         
         // Add all files from the layout
         let file_paths = layout.get_all_file_paths();
         for (path, custom_name, group_id, paused) in file_paths {
-            if let Ok(mut file) = TailedFile::new(path.clone()) {
-                if let Some(name) = custom_name {
-                    file.display_name = name;
+            match TailedFile::new(path.clone()) {
+                Ok(mut file) => {
+                    if let Some(name) = custom_name {
+                        file.display_name = name;
+                    }
+                    file.group_id = Some(group_id.clone());
+                    file.paused = paused;  // Apply paused setting from YAML
+                    
+                    // Store the index before pushing
+                    let file_idx = self.files.len();
+                    self.files.push(file);
+                    
+                    // Update the layout to link to this file
+                    layout.link_file_to_index(&path, &group_id, file_idx);
                 }
-                file.group_id = Some(group_id.clone());
-                file.paused = paused;  // Apply paused setting from YAML
-                
-                // Store the index before pushing
-                let file_idx = self.files.len();
-                self.files.push(file);
-                
-                // Update the layout to link to this file
-                layout.link_file_to_index(&path, &group_id, file_idx);
+                Err(e) => {
+                    let msg = format!("Failed to tail file '{}': {}", path.display(), e);
+                    info!("{}", msg);
+                    self.file_errors.push(msg);
+                }
             }
         }
         
@@ -935,7 +1007,7 @@ impl eframe::App for VisGrepApp {
         // Only request repaint when in tail mode and not paused
         // This prevents unnecessary updates that might cause splitter issues
         if self.mode == AppMode::Tail && !self.tail_state.paused_all {
-            ctx.request_repaint();
+            ctx.request_repaint_after(std::time::Duration::from_millis(self.tail_state.poll_interval_ms));
         }
     }
 

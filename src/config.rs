@@ -72,6 +72,10 @@ pub struct UiPreferences {
     /// Tail mode file polling interval in milliseconds
     #[serde(default = "default_poll_interval")]
     pub poll_interval_ms: u64,
+    
+    /// Maximum number of lines to keep in tail mode buffer
+    #[serde(default = "default_max_buffer_lines")]
+    pub max_buffer_lines: usize,
 }
 
 fn default_font_size() -> f32 {
@@ -82,11 +86,16 @@ fn default_poll_interval() -> u64 {
     250
 }
 
+fn default_max_buffer_lines() -> usize {
+    10000
+}
+
 impl Default for UiPreferences {
     fn default() -> Self {
         Self {
             font_size: default_font_size(),
             poll_interval_ms: default_poll_interval(),
+            max_buffer_lines: default_max_buffer_lines(),
         }
     }
 }

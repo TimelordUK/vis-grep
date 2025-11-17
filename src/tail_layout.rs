@@ -18,6 +18,7 @@ pub struct LayoutSettings {
     pub poll_interval_ms: Option<u64>,
     #[serde(default = "default_true")]
     pub auto_expand_active: bool,
+    pub max_buffer_lines: Option<usize>,
 }
 
 impl Default for LayoutSettings {
@@ -25,6 +26,7 @@ impl Default for LayoutSettings {
         Self {
             poll_interval_ms: None,
             auto_expand_active: true,
+            max_buffer_lines: None,
         }
     }
 }

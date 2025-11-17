@@ -19,6 +19,7 @@ struct SplitterData {
     axis: SplitterAxis,
     pos: f32,
     min_size: f32,
+    max_size_first: Option<f32>,
 }
 
 /// Splits a ui in half, using a draggable separator in the middle.
@@ -36,6 +37,7 @@ impl Splitter {
                 axis,
                 pos: 0.5,
                 min_size: 0.0,
+                max_size_first: None,
             },
         }
     }
@@ -50,6 +52,12 @@ impl Splitter {
     /// 0.5 = center, 0.3 = 30% first panel / 70% second panel
     pub fn default_pos(mut self, pos: f32) -> Self {
         self.data.pos = pos.clamp(0.0, 1.0);
+        self
+    }
+    
+    /// Sets the maximum allowed size for the first panel (in points)
+    pub fn max_size_first(mut self, size: f32) -> Self {
+        self.data.max_size_first = Some(size);
         self
     }
 
@@ -155,9 +163,16 @@ impl Splitter {
             data.pos += delta_pos;
         }
 
-        // Clip pos to respect min_size
+        // Clip pos to respect min_size and max_size_first
         let min_pos = (data.min_size / split_axis_size).min(1.0);
-        let max_pos = (1.0 - min_pos).max(0.0);
+        let mut max_pos = (1.0 - min_pos).max(0.0);
+        
+        // If max_size_first is set, further limit the position
+        if let Some(max_first) = data.max_size_first {
+            let max_first_ratio = (max_first / split_axis_size).min(1.0);
+            max_pos = max_pos.min(max_first_ratio);
+        }
+        
         data.pos = data.pos.clamp(min_pos, max_pos);
 
         ui.data_mut(|d| {

@@ -30,6 +30,27 @@ impl VisGrepApp {
         });
 
         ui.separator();
+        
+        // Show file errors if any
+        if !self.tail_state.file_errors.is_empty() {
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new("⚠️ File Errors:").color(egui::Color32::from_rgb(255, 200, 0)));
+                egui::ScrollArea::vertical()
+                    .max_height(100.0)
+                    .show(ui, |ui| {
+                        for error in &self.tail_state.file_errors {
+                            ui.label(egui::RichText::new(format!("• {}", error))
+                                .small()
+                                .color(egui::Color32::from_rgb(255, 150, 150)));
+                        }
+                    });
+                
+                if ui.button("Clear Errors").clicked() {
+                    self.tail_state.file_errors.clear();
+                }
+            });
+            ui.separator();
+        }
 
         // Update rate control
         ui.horizontal(|ui| {
@@ -112,6 +133,9 @@ impl VisGrepApp {
         
         ui.separator();
         
+        // Fill remaining space to prevent visual artifacts when splitter extends beyond content
+        ui.allocate_space(ui.available_size());
+        
         // The panels are now handled in main.rs for proper splitter functionality
     }
 
@@ -129,9 +153,9 @@ impl VisGrepApp {
                 ui.style_mut().text_styles.insert(egui::TextStyle::Body, font_id.clone());
                 ui.style_mut().text_styles.insert(egui::TextStyle::Button, font_id.clone());
                 
-                // Reduce spacing between items
-                ui.spacing_mut().item_spacing.y = 1.0;
-                ui.spacing_mut().button_padding.y = 1.0;
+                // Scale spacing between items based on font size
+                ui.spacing_mut().item_spacing.y = (self.tail_state.font_size * 0.1).max(0.5);
+                ui.spacing_mut().button_padding.y = (self.tail_state.font_size * 0.05).max(0.5);
 
                 // Calculate maximum filename width for alignment
                 let max_filename_len = self.tail_state.files.iter()
@@ -183,9 +207,9 @@ impl VisGrepApp {
                 ui.style_mut().text_styles.insert(egui::TextStyle::Body, font_id.clone());
                 ui.style_mut().text_styles.insert(egui::TextStyle::Button, font_id.clone());
                 
-                // Reduce spacing between items
-                ui.spacing_mut().item_spacing.y = 1.0;
-                ui.spacing_mut().button_padding.y = 1.0;
+                // Scale spacing between items based on font size
+                ui.spacing_mut().item_spacing.y = (self.tail_state.font_size * 0.1).max(0.5);
+                ui.spacing_mut().button_padding.y = (self.tail_state.font_size * 0.05).max(0.5);
                 
                 for idx in 0..self.tail_state.files.len() {
                     self.render_file_entry(ui, idx, 0);
@@ -274,8 +298,8 @@ impl VisGrepApp {
             // Scale indent based on font size (reduced from 20.0 to be more compact)
             let indent = depth as f32 * (self.tail_state.font_size * 1.0);
             
-            // Scale row height with font size
-            let row_height = self.tail_state.font_size + 2.0; // Minimal padding
+            // Scale row height with font size - more compact for smaller fonts
+            let row_height = self.tail_state.font_size * 1.2; // 20% padding scales with font
             ui.allocate_ui_with_layout(
                 egui::Vec2::new(ui.available_width(), row_height),
                 egui::Layout::left_to_right(egui::Align::Center),
@@ -323,9 +347,6 @@ impl VisGrepApp {
                 });
             });
             
-            // Add minimal spacing between rows
-            ui.add_space(1.0);
-            
             // Render children if expanded
             if !collapsed {
                 // Render subgroups
@@ -363,8 +384,8 @@ impl VisGrepApp {
         // Scale indent based on font size
         let indent = depth as f32 * (self.tail_state.font_size * 1.0);
         
-        // Scale row height with font size
-        let row_height = self.tail_state.font_size + 2.0; // Minimal padding
+        // Scale row height with font size - more compact for smaller fonts
+        let row_height = self.tail_state.font_size * 1.2; // 20% padding scales with font
         ui.allocate_ui_with_layout(
             egui::Vec2::new(ui.available_width(), row_height),
             egui::Layout::left_to_right(egui::Align::Center),
@@ -529,10 +550,7 @@ impl VisGrepApp {
         // Handle open in editor outside closure to avoid borrowing issues
         if open_in_editor_clicked {
             self.open_file_in_editor(&file_path);
-        }
-        
-        // Add minimal spacing between rows
-        ui.add_space(1.0);
+        };
     }
     
     fn pause_group(&mut self, group_id: &str) {
