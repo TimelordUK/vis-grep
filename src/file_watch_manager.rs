@@ -156,6 +156,8 @@ impl FileWatchManager {
     pub fn check_for_updates(&mut self) -> HashMap<PathBuf, (FileUpdate, Vec<FileSubscriber>)> {
         let mut updates = HashMap::new();
 
+        debug!("📂 FileWatchManager: Checking {} files for updates", self.files.len());
+
         for (path, file) in self.files.iter_mut() {
             // Check if we should skip due to error backoff
             if let Some(last_error) = file.last_error_time {
@@ -215,8 +217,15 @@ impl FileWatchManager {
 
         // Check if file was modified (either time changed or size increased)
         if current_modified <= file.last_modified && current_size <= file.last_size {
+            debug!("📂 FileWatchManager: No changes in {:?} (size: {}, modified: {:?})",
+                   file.path.file_name().unwrap_or_default(), current_size, current_modified);
             return Ok(None);
         }
+
+        debug!("📂 FileWatchManager: Detected change in {:?} - Old: size={}, modified={:?} -> New: size={}, modified={:?}",
+               file.path.file_name().unwrap_or_default(),
+               file.last_size, file.last_modified,
+               current_size, current_modified);
 
         // Check if file was truncated
         if current_size < file.last_size {

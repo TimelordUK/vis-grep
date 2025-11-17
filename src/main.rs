@@ -679,11 +679,17 @@ impl VisGrepApp {
         // Check for file updates via FileWatchManager
         let updates = self.tail_state.file_watch_manager.check_for_updates();
 
+        if !updates.is_empty() {
+            info!("📂 poll_tail_files: Received {} file updates from FileWatchManager", updates.len());
+        }
+
         // Collect activity changes to apply after the loop
         let mut activity_changes: Vec<(String, bool)> = Vec::new();
 
         // Process updates from FileWatchManager
         for (file_path, (update, subscribers)) in updates {
+            info!("📂 poll_tail_files: Processing update for {:?} with {} subscribers",
+                  file_path.file_name().unwrap_or_default(), subscribers.len());
             // Process each subscriber
             for subscriber in subscribers {
                 if let FileSubscriber::Tail { mode_id: file_idx } = subscriber {
@@ -698,6 +704,8 @@ impl VisGrepApp {
                             FileUpdate::NewLines { ref lines, start_line: _ } => {
                                 let was_active = file.is_active;
                                 if !lines.is_empty() {
+                                    info!("📂 poll_tail_files: File {} received {} new lines",
+                                          file.display_name, lines.len());
                                     file.is_active = true;
                                     file.last_activity = now;
                                     file.lines_since_last_read = lines.len();
