@@ -223,5 +223,5 @@ echo -e "${BLUE}Press Ctrl+C to stop${NC}\n"
 # Build vis-grep
 cargo build 2>&1 | tail -3
 
-# Run via run.sh with debug logging
-RUST_LOG=debug ./run.sh --tail-layout "$LAYOUT_FILE"
+# Run via run.sh (respects RUST_LOG env var, defaults to debug for testing)
+RUST_LOG="${RUST_LOG:-debug}" ./run.sh --tail-layout "$LAYOUT_FILE"
