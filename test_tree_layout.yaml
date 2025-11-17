@@ -1,4 +1,4 @@
-name: "Test Tree Layout - 2 groups, 8 files"
+name: "Test Tree Layout - 2 groups, 10 files"
 version: 1
 settings:
   poll_interval_ms: 250
@@ -8,21 +8,18 @@ groups:
   - name: "Application Logs"
     icon: "📱"
     collapsed: false
-    groups:
-      - name: "Core Services"
-        files:
-          - path: "/home/me/dev/src/vis-grep/test_logs/BookingEngine.log"
-          - path: "/home/me/dev/src/vis-grep/test_logs/Extractor.log"
-      - name: "Background Jobs"
-        collapsed: true
-        files:
-          - path: "/home/me/dev/src/vis-grep/test_logs/PaymentProcessor.log"
-          - path: "/home/me/dev/src/vis-grep/test_logs/Auth.log"
+    files:
+      - path: "/home/me/dev/vis-grep/test_logs/BookingEngine.log"
+      - path: "/home/me/dev/vis-grep/test_logs/Extractor.log"
+      - path: "/home/me/dev/vis-grep/test_logs/PaymentProcessor.log"
+      - path: "/home/me/dev/vis-grep/test_logs/Auth.log"
+      - path: "/home/me/dev/vis-grep/test_logs/NotificationService.log"
   - name: "System Logs"
     icon: "🖥️"
     collapsed: false
     files:
-      - path: "/home/me/dev/src/vis-grep/test_logs/NotificationService.log"
-      - path: "/home/me/dev/src/vis-grep/test_logs/DB.log"
-      - path: "/home/me/dev/src/vis-grep/test_logs/Cache.log"
-      - path: "/home/me/dev/src/vis-grep/test_logs/MessageQueue.log"
+      - path: "/home/me/dev/vis-grep/test_logs/DB.log"
+      - path: "/home/me/dev/vis-grep/test_logs/Cache.log"
+      - path: "/home/me/dev/vis-grep/test_logs/MessageQueue.log"
+      - path: "/home/me/dev/vis-grep/test_logs/WebServer.log"
+      - path: "/home/me/dev/vis-grep/test_logs/BackgroundWorker.log"

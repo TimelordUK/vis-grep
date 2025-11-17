@@ -20,6 +20,7 @@ mod log_parser;
 mod widgets;
 mod bookmark_manager;
 mod buffer_window;
+mod file_watch_manager;
 
 use config::Config;
 use input_handler::{InputHandler, NavigationCommand};
@@ -30,6 +31,7 @@ use tail_layout::TailLayout;
 use theme::Theme;
 use bookmark_manager::BookmarkManager;
 use buffer_window::BufferWindow;
+use file_watch_manager::{FileWatchManager, FileSubscriber, FileUpdate};
 
 // ============================================================================
 // Command-Line Arguments
@@ -404,7 +406,10 @@ struct TailState {
 
     // Bookmark management for tail mode
     bookmark_manager: BookmarkManager,
-    
+
+    // Centralized file watching
+    file_watch_manager: FileWatchManager,
+
     // Error tracking
     file_errors: Vec<String>,
 }
@@ -439,6 +444,7 @@ impl TailState {
             control_panel_height: 250.0,
             max_filename_width: 200.0,  // Initial default, will be recalculated
             bookmark_manager: BookmarkManager::new(),
+            file_watch_manager: FileWatchManager::new(),
             file_errors: Vec::new(),
         }
     }
@@ -452,6 +458,21 @@ impl TailState {
             Ok(mut file) => {
                 info!("Started tailing: {}", file.display_name);
                 file.group_id = group_id;
+
+                // Subscribe to file updates via FileWatchManager
+                let file_idx = self.files.len();
+                match self.file_watch_manager.subscribe(
+                    path.clone(),
+                    FileSubscriber::Tail { mode_id: file_idx }
+                ) {
+                    Ok(_) => {
+                        info!("📂 Subscribed to file updates for: {}", file.display_name);
+                    }
+                    Err(e) => {
+                        warn!("📂 Failed to subscribe to file watch for {}: {}", file.display_name, e);
+                    }
+                }
+
                 self.files.push(file);
                 Ok(())
             }
@@ -653,91 +674,115 @@ impl VisGrepApp {
         }
 
         self.tail_state.last_poll_time = now;
-        
+
+        // Check for file updates via FileWatchManager
+        let updates = self.tail_state.file_watch_manager.check_for_updates();
+
         // Collect activity changes to apply after the loop
         let mut activity_changes: Vec<(String, bool)> = Vec::new();
 
-        // Poll each file
-        for (file_idx, file) in self.tail_state.files.iter_mut().enumerate() {
-            if file.paused {
-                continue;
-            }
-
-            match file.check_for_updates() {
-                Ok(new_lines) => {
-                    let was_active = file.is_active;
-                    if !new_lines.is_empty() {
-                        file.is_active = true;
-                        file.last_activity = now;
-                        file.lines_since_last_read = new_lines.len();
-
-                        // Clear and recalculate level counts for recent activity
-                        file.level_counts_since_last_read.clear();
-
-                        // Store activity change to propagate later
-                        if !was_active {
-                            if let Some(group_id) = &file.group_id {
-                                activity_changes.push((group_id.clone(), true));
-                            }
+        // Process updates from FileWatchManager
+        for (file_path, (update, subscribers)) in updates {
+            // Process each subscriber
+            for subscriber in subscribers {
+                if let FileSubscriber::Tail { mode_id: file_idx } = subscriber {
+                    // Get the file from our files list
+                    if let Some(file) = self.tail_state.files.get_mut(file_idx) {
+                        // Skip if file is paused
+                        if file.paused {
+                            continue;
                         }
 
-                        // Add lines to output buffer and track log levels
-                        for line in &new_lines {
-                            // Detect and count log level for this line
-                            let level = self.log_detector.detect(line);
-                            *file.level_counts_since_last_read.entry(level).or_insert(0) += 1;
+                        match update {
+                            FileUpdate::NewLines { ref lines, start_line: _ } => {
+                                let was_active = file.is_active;
+                                if !lines.is_empty() {
+                                    file.is_active = true;
+                                    file.last_activity = now;
+                                    file.lines_since_last_read = lines.len();
 
-                            let log_line = LogLine {
-                                timestamp: now,
-                                source_file: file.display_name.clone(),
-                                line_number: file.total_lines_read,
-                                content: line.clone(),
-                            };
+                                    // Update total lines read
+                                    file.total_lines_read += lines.len();
 
-                            self.tail_state.output_buffer.push_back(log_line);
-                            self.tail_state.total_lines_received += 1;
+                                    // Clear and recalculate level counts for recent activity
+                                    file.level_counts_since_last_read.clear();
 
-                            // Trim buffer if over capacity
-                            if self.tail_state.output_buffer.len()
-                                > self.tail_state.max_buffer_lines
-                            {
-                                self.tail_state.output_buffer.pop_front();
-                                self.tail_state.lines_dropped += 1;
-                            }
-                        }
+                                    // Store activity change to propagate later
+                                    if !was_active {
+                                        if let Some(group_id) = &file.group_id {
+                                            activity_changes.push((group_id.clone(), true));
+                                        }
+                                    }
 
-                        // If preview is in Following mode and showing this file, reload it
-                        if self.tail_state.preview_mode == PreviewMode::Following {
-                            if let Some(preview_idx) = self.tail_state.preview_selected_file {
-                                if file_idx == preview_idx {
-                                    self.tail_state.preview_needs_reload = true;
+                                    // Add lines to output buffer and track log levels
+                                    for line in lines {
+                                        // Detect and count log level for this line
+                                        let level = self.log_detector.detect(line);
+                                        *file.level_counts_since_last_read.entry(level).or_insert(0) += 1;
+
+                                        let log_line = LogLine {
+                                            timestamp: now,
+                                            source_file: file.display_name.clone(),
+                                            line_number: file.total_lines_read,
+                                            content: line.clone(),
+                                        };
+
+                                        self.tail_state.output_buffer.push_back(log_line);
+                                        self.tail_state.total_lines_received += 1;
+
+                                        // Trim buffer if over capacity
+                                        if self.tail_state.output_buffer.len()
+                                            > self.tail_state.max_buffer_lines
+                                        {
+                                            self.tail_state.output_buffer.pop_front();
+                                            self.tail_state.lines_dropped += 1;
+                                        }
+                                    }
+
+                                    // If preview is in Following mode and showing this file, reload it
+                                    if self.tail_state.preview_mode == PreviewMode::Following {
+                                        if let Some(preview_idx) = self.tail_state.preview_selected_file {
+                                            if file_idx == preview_idx {
+                                                self.tail_state.preview_needs_reload = true;
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                        }
-                    } else {
-                        // Mark as idle after 2 seconds
-                        if now.duration_since(file.last_activity)
-                            > std::time::Duration::from_secs(2)
-                        {
-                            if file.is_active {
+                            FileUpdate::Truncated => {
+                                info!("📂 File truncated: {:?}", file_path);
+                                // Reset file state
+                                file.last_position = 0;
+                                file.last_size = 0;
+                                file.total_lines_read = 0;
+                            }
+                            FileUpdate::Deleted => {
+                                info!("📂 File deleted: {:?}", file_path);
                                 file.is_active = false;
-                                file.lines_since_last_read = 0;
-                                file.level_counts_since_last_read.clear();
-
-                                // Store activity change to propagate later
-                                if let Some(group_id) = &file.group_id {
-                                    activity_changes.push((group_id.clone(), false));
-                                }
+                            }
+                            FileUpdate::Error(ref err) => {
+                                info!("📂 Error reading {}: {}", file.display_name, err);
                             }
                         }
                     }
                 }
-                Err(e) => {
-                    info!("Error reading {}: {}", file.display_name, e);
+            }
+        }
+
+        // Check for idle files (mark inactive after 2 seconds)
+        for file in self.tail_state.files.iter_mut() {
+            if file.is_active && now.duration_since(file.last_activity) > std::time::Duration::from_secs(2) {
+                file.is_active = false;
+                file.lines_since_last_read = 0;
+                file.level_counts_since_last_read.clear();
+
+                // Store activity change to propagate later
+                if let Some(group_id) = &file.group_id {
+                    activity_changes.push((group_id.clone(), false));
                 }
             }
         }
-        
+
         // Apply activity changes after the loop
         for (group_id, active) in activity_changes {
             self.propagate_activity_to_group(&group_id, active);
