@@ -460,9 +460,10 @@ impl TailState {
                 file.group_id = group_id;
 
                 // Subscribe to file updates via FileWatchManager
+                // IMPORTANT: Use the absolute path from TailedFile, not the original path
                 let file_idx = self.files.len();
                 match self.file_watch_manager.subscribe(
-                    path.clone(),
+                    file.path.clone(),  // Use absolute path from TailedFile
                     FileSubscriber::Tail { mode_id: file_idx }
                 ) {
                     Ok(_) => {
