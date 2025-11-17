@@ -508,11 +508,25 @@ impl TailState {
                     }
                     file.group_id = Some(group_id.clone());
                     file.paused = paused;  // Apply paused setting from YAML
-                    
+
                     // Store the index before pushing
                     let file_idx = self.files.len();
+
+                    // Subscribe to FileWatchManager using absolute path
+                    match self.file_watch_manager.subscribe(
+                        file.path.clone(),  // Use absolute path from TailedFile
+                        FileSubscriber::Tail { mode_id: file_idx }
+                    ) {
+                        Ok(_) => {
+                            info!("📂 Subscribed to file updates for: {}", file.display_name);
+                        }
+                        Err(e) => {
+                            warn!("📂 Failed to subscribe to file watch for {}: {}", file.display_name, e);
+                        }
+                    }
+
                     self.files.push(file);
-                    
+
                     // Update the layout to link to this file
                     layout.link_file_to_index(&path, &group_id, file_idx);
                 }
