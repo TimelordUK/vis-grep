@@ -21,6 +21,8 @@ mod widgets;
 mod bookmark_manager;
 mod buffer_window;
 mod file_watch_manager;
+mod file_tail_reader;
+mod memory_monitor;
 
 use config::Config;
 use input_handler::{InputHandler, NavigationCommand};
@@ -32,6 +34,7 @@ use theme::Theme;
 use bookmark_manager::BookmarkManager;
 use buffer_window::BufferWindow;
 use file_watch_manager::{FileWatchManager, FileSubscriber, FileUpdate};
+use memory_monitor::MemoryMonitor;
 
 // ============================================================================
 // Command-Line Arguments
@@ -569,6 +572,9 @@ struct VisGrepApp {
 
     // Log level detection
     log_detector: log_parser::LogLevelDetector,
+    
+    // Memory monitoring
+    memory_monitor: MemoryMonitor,
 }
 
 impl Default for VisGrepApp {
@@ -617,6 +623,7 @@ impl VisGrepApp {
             theme,
 
             log_detector: log_parser::LogLevelDetector::new(),
+            memory_monitor: MemoryMonitor::new(),
         }
     }
 
@@ -902,38 +909,16 @@ impl VisGrepApp {
     }
 
     fn read_file_for_preview(&self, path: &PathBuf) -> std::io::Result<BufferWindow> {
-        use std::io::{BufRead, BufReader};
+        use crate::file_tail_reader::FileTailReader;
 
-        // Always read last N lines (sliding window)
-        // Paused mode just stops auto-updating, doesn't load entire file
-        let file = File::open(path)?;
-        let reader = BufReader::new(file);
-
-        let mut lines: VecDeque<String> =
-            VecDeque::with_capacity(self.tail_state.preview_follow_lines);
-        let mut total_line_count = 0;
-
-        for line in reader.lines() {
-            if let Ok(line_str) = line {
-                total_line_count += 1;
-                if lines.len() >= self.tail_state.preview_follow_lines {
-                    lines.pop_front();
-                }
-                lines.push_back(line_str);
-            }
-        }
-
-        // Calculate where the buffer starts (0-indexed)
-        let buffer_start_line = if total_line_count > self.tail_state.preview_follow_lines {
-            total_line_count - self.tail_state.preview_follow_lines
-        } else {
-            0
-        };
+        // Use efficient tail reading that seeks from end of file
+        let (lines, start_line, total_lines) = 
+            FileTailReader::read_last_lines(path, self.tail_state.preview_follow_lines)?;
 
         Ok(BufferWindow::new(
-            lines.into_iter().collect(),
-            buffer_start_line,
-            total_line_count
+            lines,
+            start_line,
+            total_lines
         ))
     }
 }
@@ -942,6 +927,9 @@ impl eframe::App for VisGrepApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Apply theme
         self.theme.apply(ctx);
+        
+        // Check memory usage periodically
+        self.memory_monitor.check();
 
         // For tail mode, handle TextViewer navigation FIRST
         // This updates cursor_line before we process bookmark commands
@@ -2333,6 +2321,11 @@ impl VisGrepApp {
                     ui.label("Test Mode - Splitter working!");
                 },
             }
+            
+            // Add memory info to the right side of status bar
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(self.memory_monitor.status_string());
+            });
         });
     }
 }

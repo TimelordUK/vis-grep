@@ -1,13 +1,36 @@
 #!/bin/bash
 
 # Test script for tail tree layout - generates YAML layout and test log files
-# Usage: ./test_tail_tree.sh [files] [groups] [nested]
-# Example: ./test_tail_tree.sh 10 2 true
+# Usage: ./test_tail_tree.sh [files] [groups] [nested] [release]
+# Example: ./test_tail_tree.sh 10 2 true release
+
+# Check for help flag
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+    echo "Usage: $0 [files] [groups] [nested] [mode]"
+    echo
+    echo "Arguments:"
+    echo "  files    Number of log files to create (default: 10)"
+    echo "  groups   Number of groups in the tree (default: 2)"
+    echo "  nested   Whether to create nested groups: true/false (default: false)"
+    echo "  mode     Build mode: debug/release (default: debug)"
+    echo
+    echo "Examples:"
+    echo "  $0                    # 10 files, 2 groups, flat, debug mode"
+    echo "  $0 20 3               # 20 files, 3 groups, flat, debug mode"
+    echo "  $0 15 2 true          # 15 files, 2 groups, nested, debug mode"
+    echo "  $0 8 2 true release   # 8 files, 2 groups, nested, release mode (minimal logging)"
+    echo
+    echo "Environment variables:"
+    echo "  RUST_LOG    Set log level (default: 'debug' for debug mode, 'info' for release)"
+    echo "              Example: RUST_LOG=warn $0 10 2 false release"
+    exit 0
+fi
 
 # Parse arguments
 NUM_FILES=${1:-10}
 NUM_GROUPS=${2:-2}
 NESTED=${3:-false}
+BUILD_MODE=${4:-debug}  # 'debug' or 'release'
 LOG_DIR="test_logs"
 LAYOUT_FILE="test_tree_layout.yaml"
 
@@ -21,6 +44,7 @@ echo -e "${BLUE}Setting up tail tree test with:${NC}"
 echo -e "  Files: ${GREEN}$NUM_FILES${NC}"
 echo -e "  Groups: ${GREEN}$NUM_GROUPS${NC}"
 echo -e "  Nested: ${GREEN}$NESTED${NC}"
+echo -e "  Build: ${GREEN}$BUILD_MODE${NC}"
 
 # Create log directory
 mkdir -p "$LOG_DIR"
@@ -220,8 +244,30 @@ trap cleanup EXIT INT TERM
 echo -e "\n${BLUE}Launching vis-grep with tree layout...${NC}"
 echo -e "${BLUE}Press Ctrl+C to stop${NC}\n"
 
-# Build vis-grep
-cargo build 2>&1 | tail -3
+# Build vis-grep based on mode
+if [[ "$BUILD_MODE" == "release" ]]; then
+    echo -e "${YELLOW}Building in release mode...${NC}"
+    cargo build --release 2>&1 | tail -3
+    
+    # Set default log level for release mode (info instead of debug)
+    DEFAULT_LOG_LEVEL="info"
+    BINARY_PATH="./target/release/vis-grep"
+else
+    echo -e "${YELLOW}Building in debug mode...${NC}"
+    cargo build 2>&1 | tail -3
+    
+    # Set default log level for debug mode
+    DEFAULT_LOG_LEVEL="debug"
+    BINARY_PATH="./target/debug/vis-grep"
+fi
 
-# Run via run.sh (respects RUST_LOG env var, defaults to debug for testing)
-RUST_LOG="${RUST_LOG:-debug}" ./run.sh --tail-layout "$LAYOUT_FILE"
+# Run vis-grep directly or via run.sh
+if [[ "$BUILD_MODE" == "release" && -f "$BINARY_PATH" ]]; then
+    # Run release binary directly with minimal logging
+    echo -e "${GREEN}Running release build with log level: ${RUST_LOG:-$DEFAULT_LOG_LEVEL}${NC}"
+    RUST_LOG="${RUST_LOG:-$DEFAULT_LOG_LEVEL}" "$BINARY_PATH" --tail-layout "$LAYOUT_FILE"
+else
+    # Run via run.sh (respects RUST_LOG env var)
+    echo -e "${GREEN}Running debug build with log level: ${RUST_LOG:-$DEFAULT_LOG_LEVEL}${NC}"
+    RUST_LOG="${RUST_LOG:-$DEFAULT_LOG_LEVEL}" ./run.sh --tail-layout "$LAYOUT_FILE"
+fi

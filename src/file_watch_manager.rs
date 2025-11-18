@@ -128,8 +128,9 @@ impl FileWatchManager {
         let size = metadata.len();
         let modified = metadata.modified()?;
 
-        // Count lines in file
-        let total_lines = Self::count_lines_static(&path)?;
+        // Don't count lines initially - we'll track incrementally
+        // This avoids the expensive operation of reading large files
+        let total_lines = 0;
 
         let watched = WatchedFile {
             path: path.clone(),
@@ -143,8 +144,8 @@ impl FileWatchManager {
             total_bytes: size,
         };
 
-        info!("📂 FileWatchManager: Started watching - {:?}, Size: {}, Lines: {}",
-              path, size, total_lines);
+        info!("📂 FileWatchManager: Started watching - {:?}, Size: {}",
+              path, size);
 
         self.files.insert(path, watched);
         Ok(())
@@ -237,10 +238,8 @@ impl FileWatchManager {
             file.last_modified = current_modified;
             file.total_bytes = current_size;
 
-            // Recount lines
-            if let Ok(lines) = Self::count_lines_static(&file.path) {
-                file.total_lines = lines;
-            }
+            // Reset line count - we'll count incrementally as we read
+            file.total_lines = 0;
 
             return Ok(Some(FileUpdate::Truncated));
         }
@@ -271,22 +270,29 @@ impl FileWatchManager {
 
     /// Read new lines from a file starting at a given position (static helper)
     fn read_new_lines_static(path: &Path, from_position: u64) -> Result<Vec<String>, std::io::Error> {
-        let file = File::open(path)?;
-        let mut reader = BufReader::new(file);
-
-        // Seek to the last position
-        use std::io::Seek;
-        reader.seek(std::io::SeekFrom::Start(from_position))?;
-
-        let mut lines = Vec::new();
-        for line in reader.lines() {
-            lines.push(line?);
+        // Use our efficient reader with a limit to prevent memory issues
+        use crate::file_tail_reader::FileTailReader;
+        
+        // Limit to 10,000 lines per poll to avoid memory bloat
+        const MAX_LINES_PER_POLL: usize = 10_000;
+        
+        let (lines, truncated) = FileTailReader::read_from_position_limited(
+            path, 
+            from_position, 
+            MAX_LINES_PER_POLL
+        )?;
+        
+        if truncated {
+            warn!("📂 FileWatchManager: Truncated read at {} lines for {:?} (file growing very fast)",
+                  MAX_LINES_PER_POLL, path);
         }
-
+        
         Ok(lines)
     }
 
     /// Count total lines in a file (static helper)
+    /// NOTE: This is expensive for large files and should be avoided
+    #[allow(dead_code)]
     fn count_lines_static(path: &Path) -> Result<usize, std::io::Error> {
         let file = File::open(path)?;
         let reader = BufReader::new(file);
