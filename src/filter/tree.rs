@@ -48,7 +48,7 @@ pub fn render_tree_filter(ui: &mut egui::Ui, filter: &mut TreeFilter) -> bool {
     changed
 }
 
-fn count_visible_files(filter: &TreeFilter) -> usize {
+fn count_visible_files(_filter: &TreeFilter) -> usize {
     // This is a placeholder - the actual count should come from the filtered file list
     // Will be updated when we have access to the file list
     0

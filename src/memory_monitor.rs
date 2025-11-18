@@ -243,8 +243,8 @@ fn get_memory_info() -> Option<MemoryInfo> {
         }
         
         Some(MemoryInfo {
-            physical_memory: pmc.WorkingSetSize,
-            virtual_memory: pmc.PagefileUsage,
+            physical_memory: pmc.WorkingSetSize as u64,
+            virtual_memory: pmc.PagefileUsage as u64,
             system_total: mem_status.ullTotalPhys,
             system_available: mem_status.ullAvailPhys,
         })

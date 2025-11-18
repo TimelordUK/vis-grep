@@ -97,7 +97,7 @@ impl Splitter {
         };
 
         let child_rect_a = Rect::from_min_size(ui.next_widget_position(), child_size_a);
-        let mut ui_a = ui.child_ui(child_rect_a, Layout::default(), None);
+        let mut ui_a = ui.new_child(egui::UiBuilder::new().max_rect(child_rect_a));
 
         let sep_rect = match data.axis {
             SplitterAxis::Horizontal => Rect::from_min_size(
@@ -143,7 +143,7 @@ impl Splitter {
                 Rect::from_min_size(Pos2::new(sep_rect.min.x, sep_rect.max.y), child_size_b)
             }
         };
-        let mut ui_b = ui.child_ui(child_rect_b, Layout::default(), None);
+        let mut ui_b = ui.new_child(egui::UiBuilder::new().max_rect(child_rect_b));
 
         add_contents(&mut ui_a, &mut ui_b);
 
