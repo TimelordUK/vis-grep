@@ -1,11 +1,18 @@
 # Add this terminal configuration block to your config.yaml
 
-# For Windows with PowerShell and less
+# For Windows with PowerShell and less (launches in new tab if Windows Terminal available)
 terminal:
   command: "pwsh"
   args: ["-NoExit", "-Command"]
   pager: "less"
   pager_args: []
+
+# Alternative: Force Windows Terminal with new tab
+# terminal:
+#   command: "wt"
+#   args: ["new-tab", "pwsh", "-NoExit", "-Command"]
+#   pager: "less"
+#   pager_args: []
 
 # Note: This requires less.exe to be in your PATH
 # Usually available if you have Git for Windows installed
