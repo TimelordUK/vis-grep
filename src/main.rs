@@ -1400,6 +1400,24 @@ impl VisGrepApp {
         Self::open_path_in_explorer(file_path);
     }
     
+    fn open_in_terminal(&self) {
+        if self.grep_state.results.is_empty() {
+            info!("No results to open");
+            return;
+        }
+
+        let current_id = self.grep_state.selected_result.unwrap_or(0);
+        let current_file_idx = current_id / 10000;
+
+        if current_file_idx >= self.grep_state.results.len() {
+            info!("Invalid file index");
+            return;
+        }
+
+        let file_path = &self.grep_state.results[current_file_idx].file_path;
+        self.open_file_in_terminal(file_path);
+    }
+    
     /// Open a file in the configured editor
     fn open_file_in_editor(&self, file_path: &std::path::Path) {
         // Try config first, then environment variables
@@ -1467,6 +1485,136 @@ impl VisGrepApp {
         }
         
         info!("Could not find any editor to open file");
+    }
+    
+    /// Open a file in terminal with a pager (less, more, etc.)
+    fn open_file_in_terminal(&self, file_path: &std::path::Path) {
+        info!("Opening file in terminal with pager: {:?}", file_path);
+        
+        if let Some(terminal_config) = &self.config.terminal {
+            let command = &terminal_config.command;
+            let mut args = terminal_config.args.clone();
+            
+            // Build the pager command
+            let pager_cmd = if terminal_config.pager_args.is_empty() {
+                format!("{} \"{}\"", terminal_config.pager, file_path.display())
+            } else {
+                format!("{} {} \"{}\"", 
+                    terminal_config.pager, 
+                    terminal_config.pager_args.join(" "),
+                    file_path.display())
+            };
+            
+            // Special handling for different terminals
+            #[cfg(target_os = "macos")]
+            if command == "Terminal" {
+                // macOS Terminal.app requires special handling via osascript
+                let script = format!(
+                    r#"tell application "Terminal"
+                        do script "{}"
+                        activate
+                    end tell"#,
+                    pager_cmd
+                );
+                
+                match std::process::Command::new("osascript")
+                    .arg("-e")
+                    .arg(&script)
+                    .spawn()
+                {
+                    Ok(_) => {
+                        info!("Opened file in Terminal.app with {}", terminal_config.pager);
+                        return;
+                    }
+                    Err(e) => {
+                        info!("Failed to open Terminal.app: {}", e);
+                    }
+                }
+            }
+            
+            // Standard terminal command execution
+            args.push(pager_cmd);
+            
+            match std::process::Command::new(command)
+                .args(&args)
+                .spawn()
+            {
+                Ok(_) => {
+                    info!("Opened file in {} with {}", command, terminal_config.pager);
+                }
+                Err(e) => {
+                    info!("Failed to open terminal: {}", e);
+                    self.try_fallback_terminals(file_path);
+                }
+            }
+        } else {
+            // No terminal configured, try fallbacks
+            self.try_fallback_terminals(file_path);
+        }
+    }
+    
+    /// Try common terminals as fallback
+    fn try_fallback_terminals(&self, file_path: &std::path::Path) {
+        #[cfg(target_os = "windows")]
+        {
+            // Try Windows Terminal, then PowerShell, then CMD
+            let file_str = file_path.display().to_string();
+            
+            // Windows Terminal
+            if std::process::Command::new("wt")
+                .args(&["-d", ".", "cmd", "/k", &format!("more \"{}\"", file_str)])
+                .spawn()
+                .is_ok()
+            {
+                info!("Opened file in Windows Terminal");
+                return;
+            }
+            
+            // PowerShell Core
+            if std::process::Command::new("pwsh")
+                .args(&["-NoExit", "-Command", &format!("Get-Content \"{}\" | more", file_str)])
+                .spawn()
+                .is_ok()
+            {
+                info!("Opened file in PowerShell Core");
+                return;
+            }
+            
+            // CMD
+            if std::process::Command::new("cmd")
+                .args(&["/k", &format!("more \"{}\"", file_str)])
+                .spawn()
+                .is_ok()
+            {
+                info!("Opened file in CMD");
+                return;
+            }
+        }
+        
+        #[cfg(not(target_os = "windows"))]
+        {
+            let pager_cmd = format!("less -R \"{}\"", file_path.display());
+            
+            // Try different terminals with their specific syntax
+            let terminals = [
+                ("gnome-terminal", "--", "sh", "-c"),
+                ("konsole", "-e", "sh", "-c"),
+                ("xfce4-terminal", "-x", "sh", "-c"),
+                ("xterm", "-e", "sh", "-c"),
+            ];
+            
+            for (terminal, arg1, arg2, arg3) in terminals {
+                let mut cmd = std::process::Command::new(terminal);
+                cmd.arg(arg1).arg(arg2).arg(arg3).arg(&pager_cmd);
+                
+                if cmd.spawn().is_ok() {
+                    info!("Opened file in {} with less", terminal);
+                    return;
+                }
+            }
+        }
+        
+        info!("Could not find any terminal to open file");
     }
     
     /// Open a file path in the system file explorer (reusable static method)

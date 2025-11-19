@@ -1,0 +1,58 @@
+# Example configuration showing terminal setup for different platforms
+
+# Windows configuration
+terminal:
+  # PowerShell Core (pwsh) - recommended for Windows
+  command: "pwsh"
+  args: ["-NoExit", "-Command"]
+  pager: "more"
+  pager_args: []
+  
+  # Alternative: Windows Terminal with CMD
+  # command: "wt"
+  # args: ["-d", ".", "cmd", "/k"]
+  # pager: "more"
+  # pager_args: []
+  
+  # Alternative: Windows Terminal with PowerShell
+  # command: "wt"
+  # args: ["-d", ".", "pwsh", "-NoExit", "-Command"]
+  # pager: "Get-Content"
+  # pager_args: ["-Wait", "|", "more"]
+
+# Linux configuration (comment out Windows section and uncomment this)
+# terminal:
+#   command: "gnome-terminal"
+#   args: ["--"]
+#   pager: "less"
+#   pager_args: ["-R"]  # -R for color support
+#   
+#   # Alternative: Konsole (KDE)
+#   # command: "konsole"
+#   # args: ["-e"]
+#   # pager: "less"
+#   # pager_args: ["-R", "-S"]  # -S for no line wrap
+#   
+#   # Alternative: xterm
+#   # command: "xterm"
+#   # args: ["-e"]
+#   # pager: "less"
+#   # pager_args: ["-R"]
+
+# macOS configuration (comment out other sections and uncomment this)
+# terminal:
+#   command: "Terminal"  # Uses special osascript handling
+#   args: []
+#   pager: "less"
+#   pager_args: ["-R"]
+#   
+#   # Alternative: iTerm2 (if installed)
+#   # command: "open"
+#   # args: ["-a", "iTerm", "-n", "--args"]
+#   # pager: "less"
+#   # pager_args: ["-R"]
+
+# Editor configuration (existing feature)
+editor:
+  command: "code"
+  args: ["--goto"]

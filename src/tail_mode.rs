@@ -379,6 +379,7 @@ impl VisGrepApp {
         // Capture the file path before the closure to avoid borrowing issues
         let file_path = file.path.clone();
         let mut open_in_editor_clicked = false;
+        let mut open_in_terminal_clicked = false;
         
         // Scale indent based on font size
         let indent = depth as f32 * (self.tail_state.font_size * 1.0);
@@ -544,11 +545,21 @@ impl VisGrepApp {
             if ui.small_button("📝").on_hover_text("Open in editor").clicked() {
                 open_in_editor_clicked = true;
             }
+            
+            // Open in terminal button
+            if ui.small_button("🖥️").on_hover_text("Open in terminal with pager").clicked() {
+                open_in_terminal_clicked = true;
+            }
         });
         
         // Handle open in editor outside closure to avoid borrowing issues
         if open_in_editor_clicked {
             self.open_file_in_editor(&file_path);
+        }
+        
+        // Handle open in terminal outside closure
+        if open_in_terminal_clicked {
+            self.open_file_in_terminal(&file_path);
         };
     }
     
@@ -854,6 +865,11 @@ impl VisGrepApp {
                         // Open in Editor button
                         if ui.button("📝 Editor").on_hover_text("Open file in editor").clicked() {
                             open_editor = true;
+                        }
+                        
+                        // Open in Terminal button
+                        if ui.button("🖥️ Terminal").on_hover_text("Open file in terminal with pager").clicked() {
+                            self.open_file_in_terminal(&file_path);
                         }
                         
                         // Copy path button

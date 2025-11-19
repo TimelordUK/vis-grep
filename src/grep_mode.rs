@@ -82,6 +82,11 @@ impl VisGrepApp {
             if ui.button("📝 Editor").on_hover_text("Open file in editor").clicked() {
                 self.open_in_editor();
             }
+            
+            // Open in Terminal button
+            if ui.button("🖥️ Terminal").on_hover_text("Open file in terminal with pager").clicked() {
+                self.open_in_terminal();
+            }
         });
         ui.separator();
 

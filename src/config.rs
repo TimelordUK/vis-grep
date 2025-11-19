@@ -29,6 +29,26 @@ pub struct EditorConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerminalConfig {
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// The pager command to run inside the terminal (e.g., "less", "more", "bat")
+    #[serde(default = "default_pager")]
+    pub pager: String,
+    #[serde(default)]
+    pub pager_args: Vec<String>,
+}
+
+fn default_pager() -> String {
+    if cfg!(windows) {
+        "more".to_string()
+    } else {
+        "less".to_string()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogFormatConfig {
     /// Custom regex patterns for log level detection
     /// Format: (pattern, level_name) where level_name is: TRACE, DEBUG, INFO, WARN, ERROR, FATAL
@@ -110,6 +130,8 @@ pub struct Config {
     #[serde(default)]
     pub editor: Option<EditorConfig>,
     #[serde(default)]
+    pub terminal: Option<TerminalConfig>,
+    #[serde(default)]
     pub log_format: LogFormatConfig,
     #[serde(default)]
     pub ui: UiPreferences,
@@ -131,6 +153,7 @@ impl Default for Config {
             saved_patterns: vec![],
             theme: Theme::default(),
             editor: None,
+            terminal: None,
             log_format: LogFormatConfig::default(),
             ui: UiPreferences::default(),
         }
@@ -262,6 +285,32 @@ impl Config {
                     "code".to_string()
                 },
                 args: vec![],
+            }),
+            terminal: Some(TerminalConfig {
+                command: if cfg!(windows) {
+                    "pwsh".to_string()  // PowerShell Core
+                } else if cfg!(target_os = "macos") {
+                    "Terminal".to_string()  // macOS Terminal.app
+                } else {
+                    "gnome-terminal".to_string()  // Common Linux terminal
+                },
+                args: if cfg!(windows) {
+                    vec!["-NoExit".to_string(), "-Command".to_string()]
+                } else if cfg!(target_os = "macos") {
+                    vec![]  // Terminal.app needs special handling
+                } else {
+                    vec!["--".to_string()]  // Most Linux terminals use -- before command
+                },
+                pager: if cfg!(windows) {
+                    "more".to_string()
+                } else {
+                    "less".to_string()
+                },
+                pager_args: if cfg!(windows) {
+                    vec![]
+                } else {
+                    vec!["-R".to_string()]  // -R for color support in less
+                },
             }),
             log_format: LogFormatConfig::default(),
             ui: UiPreferences::default(),
