@@ -1,0 +1,12 @@
+# Add this terminal configuration block to your config.yaml
+
+# For Windows with PowerShell and less
+terminal:
+  command: "pwsh"
+  args: ["-NoExit", "-Command"]
+  pager: "less"
+  pager_args: []
+
+# Note: This requires less.exe to be in your PATH
+# Usually available if you have Git for Windows installed
+# The less.exe is typically at: C:\Program Files\Git\usr\bin\less.exe

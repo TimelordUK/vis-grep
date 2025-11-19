@@ -5,8 +5,14 @@ terminal:
   # PowerShell Core (pwsh) - recommended for Windows
   command: "pwsh"
   args: ["-NoExit", "-Command"]
-  pager: "more"
+  pager: "less"  # Requires less.exe in PATH (e.g., from Git for Windows)
   pager_args: []
+  
+  # Alternative: PowerShell with more (built-in Windows pager)
+  # command: "pwsh"
+  # args: ["-NoExit", "-Command"]
+  # pager: "more"
+  # pager_args: []
   
   # Alternative: Windows Terminal with CMD
   # command: "wt"
