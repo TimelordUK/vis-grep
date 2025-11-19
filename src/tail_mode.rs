@@ -1,6 +1,5 @@
 use crate::{PreviewMode, VisGrepApp, get_color_for_file, filter, log_parser, widgets};
 use eframe::egui;
-use log::info;
 
 impl VisGrepApp {
     pub fn render_tail_mode_controls(&mut self, ui: &mut egui::Ui) {
@@ -593,6 +592,8 @@ impl VisGrepApp {
                 }
                 if ui.button("Clear").clicked() {
                     self.tail_state.output_buffer.clear();
+                    // Shrink buffer capacity to free memory
+                    self.tail_state.output_buffer.shrink_to_fit();
                     self.tail_state.total_lines_received = 0;
                     self.tail_state.lines_dropped = 0;
                 }
@@ -663,7 +664,7 @@ impl VisGrepApp {
                         if is_filtered {
                             // Find the file that generated this log line
                             let should_show = self.tail_state.files.iter().any(|file| {
-                                file.display_name == log_line.source_file &&
+                                file.display_name == log_line.source_file.as_ref() &&
                                 filter::tree::is_file_visible(
                                     &self.tail_state.tree_filter,
                                     &file.path.to_string_lossy(),
@@ -701,7 +702,7 @@ impl VisGrepApp {
 
                             // Source file with color
                             let color = get_color_for_file(&log_line.source_file);
-                            ui.colored_label(color, format!("[{}]", log_line.source_file));
+                            ui.colored_label(color, format!("[{}]", &log_line.source_file));
 
                             // Content with log level coloring
                             let detected_level = self.log_detector.detect(&log_line.content);
@@ -715,7 +716,7 @@ impl VisGrepApp {
                         // Check tree filter
                         if is_filtered {
                             let tree_visible = self.tail_state.files.iter().any(|file| {
-                                file.display_name == log_line.source_file &&
+                                file.display_name == log_line.source_file.as_ref() &&
                                 filter::tree::is_file_visible(
                                     &self.tail_state.tree_filter,
                                     &file.path.to_string_lossy(),

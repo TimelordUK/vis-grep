@@ -1,28 +1,34 @@
 #!/bin/bash
 
 # Test script for tail tree layout - generates YAML layout and test log files
-# Usage: ./test_tail_tree.sh [files] [groups] [nested] [release]
-# Example: ./test_tail_tree.sh 10 2 true release
+# Usage: ./test_tail_tree.sh [files] [groups] [nested] [mode] [hot_files]
+# Example: ./test_tail_tree.sh 10 2 true release 2
 
 # Check for help flag
 if [[ "$1" == "-h" || "$1" == "--help" ]]; then
-    echo "Usage: $0 [files] [groups] [nested] [mode]"
+    echo "Usage: $0 [files] [groups] [nested] [mode] [hot_files]"
     echo
     echo "Arguments:"
-    echo "  files    Number of log files to create (default: 10)"
-    echo "  groups   Number of groups in the tree (default: 2)"
-    echo "  nested   Whether to create nested groups: true/false (default: false)"
-    echo "  mode     Build mode: debug/release (default: debug)"
+    echo "  files      Number of log files to create (default: 10)"
+    echo "  groups     Number of groups in the tree (default: 2)"
+    echo "  nested     Whether to create nested groups: true/false (default: false)"
+    echo "  mode       Build mode: debug/release (default: debug)"
+    echo "  hot_files  Number of files to run 'hot' with heavy logging (default: 0)"
     echo
     echo "Examples:"
-    echo "  $0                    # 10 files, 2 groups, flat, debug mode"
-    echo "  $0 20 3               # 20 files, 3 groups, flat, debug mode"
-    echo "  $0 15 2 true          # 15 files, 2 groups, nested, debug mode"
-    echo "  $0 8 2 true release   # 8 files, 2 groups, nested, release mode (minimal logging)"
+    echo "  $0                      # 10 files, 2 groups, flat, debug mode, normal speed"
+    echo "  $0 20 3                 # 20 files, 3 groups, flat, debug mode, normal speed"
+    echo "  $0 15 2 true            # 15 files, 2 groups, nested, debug mode, normal speed"
+    echo "  $0 8 2 true release     # 8 files, 2 groups, nested, release mode, normal speed"
+    echo "  $0 8 2 true release 2   # 8 files, 2 groups, nested, release mode, 2 hot files"
     echo
     echo "Environment variables:"
     echo "  RUST_LOG    Set log level (default: 'debug' for debug mode, 'info' for release)"
     echo "              Example: RUST_LOG=warn $0 10 2 false release"
+    echo
+    echo "Hot files mode:"
+    echo "  When hot_files > 0, the specified number of files will generate"
+    echo "  significantly more log output to simulate high-traffic services."
     exit 0
 fi
 
@@ -31,6 +37,7 @@ NUM_FILES=${1:-10}
 NUM_GROUPS=${2:-2}
 NESTED=${3:-false}
 BUILD_MODE=${4:-debug}  # 'debug' or 'release'
+HOT_FILES=${5:-0}  # Number of files to run "hot" with heavy logging
 LOG_DIR="test_logs"
 LAYOUT_FILE="test_tree_layout.yaml"
 
@@ -45,6 +52,7 @@ echo -e "  Files: ${GREEN}$NUM_FILES${NC}"
 echo -e "  Groups: ${GREEN}$NUM_GROUPS${NC}"
 echo -e "  Nested: ${GREEN}$NESTED${NC}"
 echo -e "  Build: ${GREEN}$BUILD_MODE${NC}"
+echo -e "  Hot files: ${GREEN}$HOT_FILES${NC}"
 
 # Create log directory
 mkdir -p "$LOG_DIR"
@@ -207,8 +215,20 @@ append_logs() {
     
     local levels=("INFO" "WARN" "ERROR" "DEBUG")
     
+    # Track which files are designated as "hot"
+    local hot_file_indices=()
+    if [[ $HOT_FILES -gt 0 ]]; then
+        echo -e "${YELLOW}Hot files enabled for first $HOT_FILES files:${NC}"
+        for (( i=0; i<HOT_FILES && i<NUM_FILES; i++ )); do
+            hot_file_indices+=($i)
+            local filename=$(get_log_filename $i)
+            echo -e "  - ${GREEN}$filename${NC} (generating heavy traffic)"
+        done
+        echo
+    fi
+    
     while true; do
-        # Randomly select a few files to update
+        # Normal files: update 1-3 files randomly
         local files_to_update=$((RANDOM % 3 + 1))
 
         for (( i=0; i<files_to_update; i++ )); do
@@ -222,7 +242,30 @@ append_logs() {
             echo "[$timestamp] [$level] $msg $((RANDOM % 1000))" >> "$file"
         done
         
-        sleep 0.$((RANDOM % 1000))  # Random sleep 0-1 second
+        # Hot files: generate much more traffic
+        if [[ $HOT_FILES -gt 0 ]]; then
+            for hot_idx in "${hot_file_indices[@]}"; do
+                local filename=$(get_log_filename $hot_idx)
+                local file="$LOG_DIR/$filename"
+                
+                # Generate 5-20 lines for each hot file
+                local lines_to_add=$((RANDOM % 16 + 5))
+                for (( j=0; j<lines_to_add; j++ )); do
+                    local level="${levels[$((RANDOM % ${#levels[@]}))]}"
+                    local msg="${messages[$((RANDOM % ${#messages[@]}))]}"
+                    local timestamp=$(date '+%Y-%m-%d %H:%M:%S.%3N')
+                    
+                    # Add more detailed messages for hot files
+                    echo "[$timestamp] [$level] [HOT] $msg - Details: request_id=$(uuidgen | cut -c1-8), duration=$((RANDOM % 500))ms, size=$((RANDOM % 10000))bytes" >> "$file"
+                done
+            done
+            
+            # Hot files update more frequently
+            sleep 0.$((RANDOM % 200))  # 0-0.2 seconds
+        else
+            # Normal update rate
+            sleep 0.$((RANDOM % 1000))  # 0-1 second
+        fi
     done
 }
 

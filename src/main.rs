@@ -5,6 +5,7 @@ use log::{debug, info, warn};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
+use std::sync::Arc;
 
 mod config;
 mod input_handler;
@@ -187,6 +188,7 @@ struct TailedFile {
     // Identity
     path: PathBuf,
     display_name: String,
+    display_name_arc: Arc<str>,
 
     // File monitoring
     last_size: u64,
@@ -235,9 +237,12 @@ impl TailedFile {
         let metadata = std::fs::metadata(&absolute_path)?;
         let size = metadata.len();
 
+        let display_name_arc = Arc::from(display_name.as_str());
+        
         Ok(Self {
             path: absolute_path,
             display_name,
+            display_name_arc,
             last_size: size,
             last_position: size, // Start at end (like tail -f)
             is_active: false,
@@ -345,7 +350,7 @@ impl TailedFile {
 
 struct LogLine {
     timestamp: Instant,
-    source_file: String,
+    source_file: Arc<str>,
     line_number: usize,
     content: String,
 }
@@ -757,7 +762,7 @@ impl VisGrepApp {
 
                                         let log_line = LogLine {
                                             timestamp: now,
-                                            source_file: file.display_name.clone(),
+                                            source_file: Arc::clone(&file.display_name_arc),
                                             line_number: file.total_lines_read,
                                             content: line.clone(),
                                         };
