@@ -1505,6 +1505,9 @@ impl VisGrepApp {
                     file_path.display())
             };
             
+            info!("Terminal config found - Command: {}, Args: {:?}, Pager command: {}", 
+                command, args, pager_cmd);
+            
             // Special handling for different terminals
             #[cfg(target_os = "macos")]
             if command == "Terminal" {
@@ -1535,32 +1538,39 @@ impl VisGrepApp {
             // Standard terminal command execution
             args.push(pager_cmd);
             
+            info!("Executing command: {} with args: {:?}", command, args);
+            
             match std::process::Command::new(command)
                 .args(&args)
                 .spawn()
             {
                 Ok(_) => {
-                    info!("Opened file in {} with {}", command, terminal_config.pager);
+                    info!("Successfully opened file in {} with {}", command, terminal_config.pager);
                 }
                 Err(e) => {
-                    info!("Failed to open terminal: {}", e);
+                    info!("Failed to open terminal '{}': {}", command, e);
+                    info!("Falling back to default terminals...");
                     self.try_fallback_terminals(file_path);
                 }
             }
         } else {
             // No terminal configured, try fallbacks
+            info!("No terminal config found in config.yaml, using fallback terminals");
             self.try_fallback_terminals(file_path);
         }
     }
     
     /// Try common terminals as fallback
     fn try_fallback_terminals(&self, file_path: &std::path::Path) {
+        info!("Trying fallback terminals for file: {:?}", file_path);
+        
         #[cfg(target_os = "windows")]
         {
             // Try Windows Terminal, then PowerShell, then CMD
             let file_str = file_path.display().to_string();
             
             // Windows Terminal
+            info!("Trying Windows Terminal with: wt -d . cmd /k more \"{}\"", file_str);
             if std::process::Command::new("wt")
                 .args(&["-d", ".", "cmd", "/k", &format!("more \"{}\"", file_str)])
                 .spawn()

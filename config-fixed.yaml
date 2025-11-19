@@ -1,0 +1,33 @@
+folder_presets:
+- name: Logs
+  path: ~/logs
+- name: FIX Messages
+  path: ~/work/fix-logs
+- name: Nvim Config
+  path: ~/.config/nvim/lua/plugins
+- name: Project
+  path: ~/dev/myproject
+saved_patterns:
+- name: Execution Report
+  pattern: 35=8
+  description: MsgType = Execution Report
+  category: FIX
+- name: Error
+  pattern: (?i)error
+  description: Case-insensitive error messages
+  category: Errors
+theme: Dark
+editor:
+  command: "C:\\Program Files\\Notepad++\\notepad++.exe"
+  args: []
+terminal:
+  command: "pwsh"
+  args: ["-NoExit", "-Command"]
+  pager: "less"
+  pager_args: []
+log_format:
+  custom_patterns: []
+  color_preset: Monochrome
+ui:
+  font_size: 12.0
+  poll_interval_ms: 250

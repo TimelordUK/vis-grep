@@ -203,7 +203,12 @@ impl Config {
                     Ok(content) => match serde_yaml::from_str(&content) {
                         Ok(config) => {
                             info!("Loaded config from {:?}", path);
-                            return config;
+                            let cfg: Config = config;
+                            info!("Terminal config loaded: {:?}", cfg.terminal.is_some());
+                            if let Some(ref term) = cfg.terminal {
+                                info!("Terminal: command={}, pager={}", term.command, term.pager);
+                            }
+                            return cfg;
                         }
                         Err(e) => {
                             warn!("Failed to parse config file: {}", e);
