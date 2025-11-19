@@ -7,7 +7,7 @@ terminal:
   pager: "less"
   pager_args: []
 
-# Alternative: Force Windows Terminal with new tab
+# Alternative: Force Windows Terminal with new tab (already includes new-tab in args)
 # terminal:
 #   command: "wt"
 #   args: ["new-tab", "pwsh", "-NoExit", "-Command"]

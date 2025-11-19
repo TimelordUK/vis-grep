@@ -1546,12 +1546,12 @@ impl VisGrepApp {
                 if args.len() >= 2 && args[0] == "-NoExit" && args[1] == "-Command" {
                     // This is PowerShell syntax
                     wt_args.push("pwsh.exe".to_string());
-                    wt_args.extend(args);
-                    wt_args.push(pager_cmd);
+                    wt_args.extend(args.clone());
+                    wt_args.push(pager_cmd.clone());
                 } else {
                     // Generic case - add all args and pager command
-                    wt_args.extend(args);
-                    wt_args.push(pager_cmd);
+                    wt_args.extend(args.clone());
+                    wt_args.push(pager_cmd.clone());
                 }
                 
                 info!("Executing Windows Terminal: {} with args: {:?}", command, wt_args);
@@ -1575,26 +1575,28 @@ impl VisGrepApp {
             #[cfg(target_os = "windows")]
             if command == "pwsh" || command == "pwsh.exe" || command == "powershell" || command == "powershell.exe" {
                 // Try to launch via Windows Terminal in a new tab
-                let wt_args = vec![
-                    "new-tab",
-                    command,
-                    &args[0],  // -NoExit
-                    &args[1],  // -Command
-                    &pager_cmd
-                ];
-                
-                info!("Trying to launch via Windows Terminal: wt with args: {:?}", wt_args);
-                
-                if std::process::Command::new("wt")
-                    .args(&wt_args)
-                    .spawn()
-                    .is_ok()
-                {
-                    info!("Successfully opened file in new Windows Terminal tab with {}", terminal_config.pager);
-                    return;
+                if args.len() >= 2 {
+                    let wt_args = vec![
+                        "new-tab".to_string(),
+                        command.to_string(),
+                        args[0].clone(),  // -NoExit
+                        args[1].clone(),  // -Command
+                        pager_cmd.clone()
+                    ];
+                    
+                    info!("Trying to launch via Windows Terminal: wt with args: {:?}", wt_args);
+                    
+                    if std::process::Command::new("wt")
+                        .args(&wt_args)
+                        .spawn()
+                        .is_ok()
+                    {
+                        info!("Successfully opened file in new Windows Terminal tab with {}", terminal_config.pager);
+                        return;
+                    }
+                    
+                    info!("Windows Terminal not available, falling back to direct execution");
                 }
-                
-                info!("Windows Terminal not available, falling back to direct execution");
             }
             
             // Standard terminal command execution (fallback)
