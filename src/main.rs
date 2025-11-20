@@ -216,6 +216,10 @@ struct TailedFile {
     // Error tracking for recovery
     consecutive_errors: u32,
     last_error_time: Option<Instant>,
+    
+    // Cached display strings to avoid repeated allocations
+    cached_path_string: String,
+    cached_size_kb_string: String,
 }
 
 impl TailedFile {
@@ -238,6 +242,8 @@ impl TailedFile {
         let size = metadata.len();
 
         let display_name_arc = Arc::from(display_name.as_str());
+        let cached_path_string = absolute_path.to_string_lossy().to_string();
+        let cached_size_kb_string = format!("{:.1} KB", size as f64 / 1024.0);
         
         Ok(Self {
             path: absolute_path,
@@ -256,6 +262,8 @@ impl TailedFile {
             group_id: None,
             consecutive_errors: 0,
             last_error_time: None,
+            cached_path_string,
+            cached_size_kb_string,
         })
     }
 
@@ -338,9 +346,11 @@ impl TailedFile {
                             self.display_name, self.last_size, current_size);
                         self.last_position = 0;
                         self.last_size = current_size;
+                        self.cached_size_kb_string = format!("{:.1} KB", current_size as f64 / 1024.0);
                         return Ok(vec!["[FILE TRUNCATED/ROTATED]".to_string()]);
                     }
                     self.last_size = current_size;
+                    self.cached_size_kb_string = format!("{:.1} KB", current_size as f64 / 1024.0);
                 }
             }
             Ok(vec![])
@@ -794,6 +804,7 @@ impl VisGrepApp {
                                 // Reset file state
                                 file.last_position = 0;
                                 file.last_size = 0;
+                                file.cached_size_kb_string = format!("0.0 KB");
                                 file.total_lines_read = 0;
                             }
                             FileUpdate::Deleted => {
@@ -831,6 +842,19 @@ impl VisGrepApp {
         // Reload preview if needed (auto update from file polling)
         if self.tail_state.preview_needs_reload {
             self.reload_tail_preview_impl(true);  // auto_update = true
+        }
+        
+        // Periodically shrink buffer capacity to free memory
+        // VecDeque can grow but doesn't shrink automatically
+        if self.tail_state.total_lines_received % 1000 == 0 {
+            let current_capacity = self.tail_state.output_buffer.capacity();
+            let current_len = self.tail_state.output_buffer.len();
+            
+            // If capacity is more than 2x the actual usage, shrink it
+            if current_capacity > current_len * 2 && current_capacity > self.tail_state.max_buffer_lines {
+                info!("Shrinking buffer capacity from {} to {}", current_capacity, current_len + 1000);
+                self.tail_state.output_buffer.shrink_to(current_len + 1000);
+            }
         }
     }
     

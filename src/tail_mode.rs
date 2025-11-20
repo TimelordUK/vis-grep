@@ -1,5 +1,119 @@
 use crate::{PreviewMode, VisGrepApp, get_color_for_file, filter, log_parser, widgets};
+use crate::log_parser::LogLevel;
 use eframe::egui;
+
+// Constants for commonly used strings to avoid allocations
+const IDLE_STRING: &str = "(idle)";
+const EMPTY_STRING: &str = "";
+
+// Cache for common log level count strings (e.g., "INF:1", "DBG:2")
+// We cache counts 1-9 for each level since these are most common
+use std::sync::OnceLock;
+static LOG_LEVEL_COUNT_CACHE: OnceLock<std::collections::HashMap<(LogLevel, usize), String>> = OnceLock::new();
+
+// Cache for common "+N lines" strings
+static LINES_COUNT_CACHE: OnceLock<std::collections::HashMap<usize, String>> = OnceLock::new();
+
+// Cache for common time strings like "1s", "2m", etc.
+static TIME_STRING_CACHE: OnceLock<std::collections::HashMap<u64, String>> = OnceLock::new();
+
+fn get_log_level_count_string(level: &str, count: usize) -> String {
+    // For small counts (1-9), use cached strings
+    if count <= 9 {
+        // Try to find the level enum from abbreviation
+        let level_enum = match level {
+            "FTL" => Some(LogLevel::Fatal),
+            "ERR" => Some(LogLevel::Error),
+            "WRN" => Some(LogLevel::Warn),
+            "INF" => Some(LogLevel::Info),
+            "DBG" => Some(LogLevel::Debug),
+            "TRC" => Some(LogLevel::Trace),
+            "UNK" => Some(LogLevel::Unknown),
+            _ => None,
+        };
+        
+        if let Some(level_enum) = level_enum {
+            let cache = LOG_LEVEL_COUNT_CACHE.get_or_init(|| {
+                let mut map = std::collections::HashMap::new();
+                let levels = [
+                    (LogLevel::Fatal, "FTL"),
+                    (LogLevel::Error, "ERR"),
+                    (LogLevel::Warn, "WRN"),
+                    (LogLevel::Info, "INF"),
+                    (LogLevel::Debug, "DBG"),
+                    (LogLevel::Trace, "TRC"),
+                    (LogLevel::Unknown, "UNK"),
+                ];
+                
+                for (level, abbrev) in levels {
+                    for i in 1..=9 {
+                        map.insert((level, i), format!("{}:{}", abbrev, i));
+                    }
+                }
+                map
+            });
+            
+            if let Some(cached) = cache.get(&(level_enum, count)) {
+                return cached.clone();
+            }
+        }
+    }
+    
+    // Fall back to dynamic formatting for large counts or unknown levels
+    format!("{}:{}", level, count)
+}
+
+fn get_lines_count_string(count: usize) -> String {
+    // Cache common counts (1-20)
+    if count <= 20 {
+        let cache = LINES_COUNT_CACHE.get_or_init(|| {
+            let mut map = std::collections::HashMap::new();
+            for i in 1..=20 {
+                map.insert(i, format!("(+{} lines)", i));
+            }
+            map
+        });
+        
+        if let Some(cached) = cache.get(&count) {
+            return cached.clone();
+        }
+    }
+    
+    // Fall back to dynamic formatting for large counts
+    format!("(+{} lines)", count)
+}
+
+fn get_time_string(seconds: u64) -> String {
+    let cache = TIME_STRING_CACHE.get_or_init(|| {
+        let mut map = std::collections::HashMap::new();
+        // Cache common second values (0-60)
+        for i in 0..=60 {
+            map.insert(i, format!("{}s", i));
+        }
+        // Cache common minute values (1-10 minutes)
+        for i in 1..=10 {
+            map.insert(i * 60, format!("{}m", i));
+        }
+        // Cache common hour values (1-3 hours)
+        for i in 1..=3 {
+            map.insert(i * 3600, format!("{}h", i));
+        }
+        map
+    });
+    
+    if let Some(cached) = cache.get(&seconds) {
+        return cached.clone();
+    }
+    
+    // Fall back to dynamic formatting
+    if seconds < 60 {
+        format!("{}s", seconds)
+    } else if seconds < 3600 {
+        format!("{}m", seconds / 60)
+    } else {
+        format!("{}h", seconds / 3600)
+    }
+}
 
 impl VisGrepApp {
     pub fn render_tail_mode_controls(&mut self, ui: &mut egui::Ui) {
@@ -495,25 +609,25 @@ impl VisGrepApp {
                     for (level, abbrev) in &priority_levels {
                         if let Some(count) = file.level_counts_since_last_read.get(level) {
                             if *count > 0 {
-                                parts.push(format!("{}:{}", abbrev, count));
+                                parts.push(get_log_level_count_string(abbrev, *count));
                             }
                         }
                     }
 
                     let text = if parts.is_empty() {
-                        format!("(+{} lines)", file.lines_since_last_read)
+                        get_lines_count_string(file.lines_since_last_read)
                     } else {
                         format!("({})", parts.join(" "))
                     };
 
                     (text, egui::Color32::from_rgb(255, 200, 100))
                 } else {
-                    (format!("(+{} lines)", file.lines_since_last_read), egui::Color32::from_rgb(255, 200, 100))
+                    (get_lines_count_string(file.lines_since_last_read), egui::Color32::from_rgb(255, 200, 100))
                 }
             } else if !file.is_active {
-                ("(idle)".to_string(), egui::Color32::GRAY)
+                (IDLE_STRING.to_string(), egui::Color32::GRAY)
             } else {
-                ("".to_string(), egui::Color32::GRAY)
+                (EMPTY_STRING.to_string(), egui::Color32::GRAY)
             };
 
             ui.add_sized(
@@ -531,9 +645,8 @@ impl VisGrepApp {
                 use arboard::Clipboard;
                 match Clipboard::new() {
                     Ok(mut clipboard) => {
-                        let path_str = file.path.to_string_lossy().to_string();
-                        match clipboard.set_text(&path_str) {
-                            Ok(_) => log::info!("Copied path to clipboard: {}", path_str),
+                        match clipboard.set_text(&file.cached_path_string) {
+                            Ok(_) => log::info!("Copied path to clipboard: {}", file.cached_path_string),
                             Err(e) => log::error!("Failed to copy path: {}", e),
                         }
                     }
@@ -702,13 +815,7 @@ impl VisGrepApp {
                             // Timestamp (relative)
                             let elapsed = log_line.timestamp.elapsed();
                             let secs = elapsed.as_secs();
-                            let time_str = if secs < 60 {
-                                format!("{}s", secs)
-                            } else if secs < 3600 {
-                                format!("{}m", secs / 60)
-                            } else {
-                                format!("{}h", secs / 3600)
-                            };
+                            let time_str = get_time_string(secs);
                             ui.label(egui::RichText::new(time_str).color(egui::Color32::GRAY));
 
                             // Source file with color
