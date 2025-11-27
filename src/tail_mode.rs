@@ -6,16 +6,21 @@ use eframe::egui;
 const IDLE_STRING: &str = "(idle)";
 const EMPTY_STRING: &str = "";
 
+// Use bounded caches to prevent unbounded memory growth
+use once_cell::sync::Lazy;
+use crate::bounded_cache::TupleStringCache;
+
 // Cache for common log level count strings (e.g., "INF:1", "DBG:2")
-// We cache counts 1-9 for each level since these are most common
-use std::sync::OnceLock;
-static LOG_LEVEL_COUNT_CACHE: OnceLock<std::collections::HashMap<(LogLevel, usize), String>> = OnceLock::new();
+static LOG_LEVEL_COUNT_CACHE: Lazy<TupleStringCache<(LogLevel, usize)>> = 
+    Lazy::new(|| TupleStringCache::new(100)); // Cache up to 100 entries
 
 // Cache for common "+N lines" strings
-static LINES_COUNT_CACHE: OnceLock<std::collections::HashMap<usize, String>> = OnceLock::new();
+static LINES_COUNT_CACHE: Lazy<TupleStringCache<usize>> = 
+    Lazy::new(|| TupleStringCache::new(50)); // Cache up to 50 entries
 
 // Cache for common time strings like "1s", "2m", etc.
-static TIME_STRING_CACHE: OnceLock<std::collections::HashMap<u64, String>> = OnceLock::new();
+static TIME_STRING_CACHE: Lazy<TupleStringCache<u64>> = 
+    Lazy::new(|| TupleStringCache::new(50)); // Cache up to 50 entries
 
 fn get_log_level_count_string(level: &str, count: usize) -> String {
     // For small counts (1-9), use cached strings
@@ -33,29 +38,10 @@ fn get_log_level_count_string(level: &str, count: usize) -> String {
         };
         
         if let Some(level_enum) = level_enum {
-            let cache = LOG_LEVEL_COUNT_CACHE.get_or_init(|| {
-                let mut map = std::collections::HashMap::new();
-                let levels = [
-                    (LogLevel::Fatal, "FTL"),
-                    (LogLevel::Error, "ERR"),
-                    (LogLevel::Warn, "WRN"),
-                    (LogLevel::Info, "INF"),
-                    (LogLevel::Debug, "DBG"),
-                    (LogLevel::Trace, "TRC"),
-                    (LogLevel::Unknown, "UNK"),
-                ];
-                
-                for (level, abbrev) in levels {
-                    for i in 1..=9 {
-                        map.insert((level, i), format!("{}:{}", abbrev, i));
-                    }
-                }
-                map
-            });
-            
-            if let Some(cached) = cache.get(&(level_enum, count)) {
-                return cached.clone();
-            }
+            return LOG_LEVEL_COUNT_CACHE.get_or_insert_with(
+                (level_enum, count),
+                || format!("{}:{}", level, count)
+            );
         }
     }
     
@@ -64,55 +50,25 @@ fn get_log_level_count_string(level: &str, count: usize) -> String {
 }
 
 fn get_lines_count_string(count: usize) -> String {
-    // Cache common counts (1-20)
-    if count <= 20 {
-        let cache = LINES_COUNT_CACHE.get_or_init(|| {
-            let mut map = std::collections::HashMap::new();
-            for i in 1..=20 {
-                map.insert(i, format!("(+{} lines)", i));
-            }
-            map
-        });
-        
-        if let Some(cached) = cache.get(&count) {
-            return cached.clone();
-        }
-    }
-    
-    // Fall back to dynamic formatting for large counts
-    format!("(+{} lines)", count)
+    LINES_COUNT_CACHE.get_or_insert_with(
+        count,
+        || format!("(+{} lines)", count)
+    )
 }
 
 fn get_time_string(seconds: u64) -> String {
-    let cache = TIME_STRING_CACHE.get_or_init(|| {
-        let mut map = std::collections::HashMap::new();
-        // Cache common second values (0-60)
-        for i in 0..=60 {
-            map.insert(i, format!("{}s", i));
+    TIME_STRING_CACHE.get_or_insert_with(
+        seconds,
+        || {
+            if seconds < 60 {
+                format!("{}s", seconds)
+            } else if seconds < 3600 {
+                format!("{}m", seconds / 60)
+            } else {
+                format!("{}h", seconds / 3600)
+            }
         }
-        // Cache common minute values (1-10 minutes)
-        for i in 1..=10 {
-            map.insert(i * 60, format!("{}m", i));
-        }
-        // Cache common hour values (1-3 hours)
-        for i in 1..=3 {
-            map.insert(i * 3600, format!("{}h", i));
-        }
-        map
-    });
-    
-    if let Some(cached) = cache.get(&seconds) {
-        return cached.clone();
-    }
-    
-    // Fall back to dynamic formatting
-    if seconds < 60 {
-        format!("{}s", seconds)
-    } else if seconds < 3600 {
-        format!("{}m", seconds / 60)
-    } else {
-        format!("{}h", seconds / 3600)
-    }
+    )
 }
 
 impl VisGrepApp {
@@ -825,7 +781,7 @@ impl VisGrepApp {
                             // Content with log level coloring
                             let detected_level = self.log_detector.detect(&log_line.content);
                             let level_color = self.config.log_format.get_color_scheme().get_color(detected_level);
-                            ui.colored_label(level_color, &log_line.content);
+                            ui.colored_label(level_color, &*log_line.content);
                         });
                     }
 

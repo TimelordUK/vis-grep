@@ -19,6 +19,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 clap = { version = "4.5", features = ["derive"] }  # Command-line argument parsing
 once_cell = "1.21.3"
+chrono = "0.4"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["processthreadsapi", "psapi", "sysinfoapi", "minwindef"] }
@@ -29,3 +30,8 @@ mach = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
+chrono = "0.4"
+
+[[bin]]
+name = "test-file-watch-memory"
+path = "src/bin/test_file_watch_memory.rs"

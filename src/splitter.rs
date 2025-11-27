@@ -3,7 +3,7 @@
 // Needed because egui's built-in TopBottomPanel::resizable() doesn't work reliably
 
 use std::hash::Hash;
-use egui::{CursorIcon, Id, Layout, Pos2, Rect, Rounding, Sense, Ui, Vec2};
+use egui::{CursorIcon, Id, Pos2, Rect, Rounding, Sense, Ui, Vec2};
 use serde::{Deserialize, Serialize};
 
 /// An axis that a Splitter can use

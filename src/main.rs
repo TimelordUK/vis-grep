@@ -24,6 +24,8 @@ mod buffer_window;
 mod file_watch_manager;
 mod file_tail_reader;
 mod memory_monitor;
+mod string_cache;
+mod bounded_cache;
 
 use config::Config;
 use input_handler::{InputHandler, NavigationCommand};
@@ -362,7 +364,7 @@ struct LogLine {
     timestamp: Instant,
     source_file: Arc<str>,
     line_number: usize,
-    content: String,
+    content: Arc<str>, // Changed from String to Arc<str> for memory efficiency
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -774,7 +776,7 @@ impl VisGrepApp {
                                             timestamp: now,
                                             source_file: Arc::clone(&file.display_name_arc),
                                             line_number: file.total_lines_read,
-                                            content: line.clone(),
+                                            content: string_cache::intern_string(line),
                                         };
 
                                         self.tail_state.output_buffer.push_back(log_line);
@@ -844,16 +846,31 @@ impl VisGrepApp {
             self.reload_tail_preview_impl(true);  // auto_update = true
         }
         
-        // Periodically shrink buffer capacity to free memory
-        // VecDeque can grow but doesn't shrink automatically
-        if self.tail_state.total_lines_received % 1000 == 0 {
+        // Aggressively shrink buffer capacity to free memory
+        // Check every 100 lines instead of 1000 for more responsive memory management
+        if self.tail_state.total_lines_received % 100 == 0 {
             let current_capacity = self.tail_state.output_buffer.capacity();
             let current_len = self.tail_state.output_buffer.len();
             
-            // If capacity is more than 2x the actual usage, shrink it
-            if current_capacity > current_len * 2 && current_capacity > self.tail_state.max_buffer_lines {
-                info!("Shrinking buffer capacity from {} to {}", current_capacity, current_len + 1000);
-                self.tail_state.output_buffer.shrink_to(current_len + 1000);
+            // Be more aggressive: shrink if capacity is more than 1.5x actual usage
+            // This helps prevent memory bloat during bursts of activity
+            let target_capacity = (current_len as f32 * 1.2) as usize + 100;
+            
+            if current_capacity > target_capacity && current_capacity > current_len + 100 {
+                debug!("Shrinking buffer capacity from {} to {} (current len: {})", 
+                    current_capacity, target_capacity, current_len);
+                self.tail_state.output_buffer.shrink_to(target_capacity);
+                
+                // Also trigger string cache cleanup periodically
+                if self.tail_state.total_lines_received % 10000 == 0 {
+                    let (size, hits, misses) = string_cache::cache_stats();
+                    let hit_rate = if hits + misses > 0 {
+                        (hits as f32 / (hits + misses) as f32) * 100.0
+                    } else {
+                        0.0
+                    };
+                    info!("String cache stats: {} entries, {:.1}% hit rate", size, hit_rate);
+                }
             }
         }
     }
