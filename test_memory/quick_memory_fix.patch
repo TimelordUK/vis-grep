@@ -1,0 +1,53 @@
+--- a/src/tail_mode.rs
++++ b/src/tail_mode.rs
+@@ -735,6 +735,15 @@ impl TailMode {
+         // Main output area
+         ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
+             egui::ScrollArea::vertical().id_salt("tail_output").show(ui, |ui| {
++                // QUICK FIX: Only render visible lines to prevent memory explosion
++                let line_height = 20.0; // Approximate line height
++                let visible_lines = (ui.available_height() / line_height) as usize;
++                let total_lines = self.tail_state.output_buffer.len();
++                
++                // Skip to last N lines (tail behavior)
++                let skip_lines = total_lines.saturating_sub(visible_lines + 20); // +20 for buffer
++                let mut rendered_lines = 0;
++                
+                 let mut first_match_idx = None;
+                 let mut idx_counter = 0;
+                 
+@@ -745,6 +754,13 @@ impl TailMode {
+                 }
+                 
+                 for log_line in &self.tail_state.output_buffer {
++                    // QUICK FIX: Skip lines until we're near the visible area
++                    if idx_counter < skip_lines {
++                        idx_counter += 1;
++                        continue;
++                    }
++                    
++                    rendered_lines += 1;
+                     let is_match = if !filter.trim().is_empty() {
+                         self.tail_state.preview_filter.is_line_match(idx_counter)
+                     } else {
+--- a/src/text_viewer.rs
++++ b/src/text_viewer.rs
+@@ -157,9 +157,20 @@ impl TextViewerState {
+             ui.label("No content");
+         } else {
+             egui::ScrollArea::vertical().id_salt(id_source).show(ui, |ui| {
++                // QUICK FIX: Only render visible lines
++                let line_height = 20.0;
++                let visible_lines = (ui.available_height() / line_height) as usize;
++                let total_lines = self.content.len();
++                
++                // For preview, show last N lines
++                let start_line = total_lines.saturating_sub(visible_lines + 10);
++                
+                 ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
+                     let mut current_match_idx = 0;
+                     for (line_idx, line) in self.content.iter().enumerate() {
++                        if line_idx < start_line {
++                            continue;
++                        }
+                         let is_marked = self.marks.values().any(|&m| m == line_idx);

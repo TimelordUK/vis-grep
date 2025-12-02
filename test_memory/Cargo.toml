@@ -1,0 +1,11 @@
+[package]
+name = "headless-tail-test"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "headless_tail"
+path = "headless_tail_standalone.rs"
+
+[dependencies]
+# No dependencies needed - pure Rust!
