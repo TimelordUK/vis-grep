@@ -1,0 +1,19 @@
+folder_presets:
+  - name: "Test Logs"
+    path: "./test_logs"
+
+ui:
+  font_size: 14.0
+  poll_interval_ms: 250
+  max_buffer_lines: 10000
+  auto_shutdown_minutes: 2  # Set to 2 minutes for testing
+
+editor:
+  command: "code"
+  args: ["--goto"]
+
+terminal:
+  command: "gnome-terminal"
+  args: ["--"]
+  pager: "mless"
+  pager_args: []

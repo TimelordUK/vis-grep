@@ -26,6 +26,7 @@ mod file_tail_reader;
 mod memory_monitor;
 mod string_cache;
 mod bounded_cache;
+mod idle_monitor;
 
 use config::Config;
 use input_handler::{InputHandler, NavigationCommand};
@@ -38,6 +39,7 @@ use bookmark_manager::BookmarkManager;
 use buffer_window::BufferWindow;
 use file_watch_manager::{FileWatchManager, FileSubscriber, FileUpdate};
 use memory_monitor::MemoryMonitor;
+use idle_monitor::IdleMonitor;
 
 // ============================================================================
 // Command-Line Arguments
@@ -601,6 +603,9 @@ struct VisGrepApp {
     
     // Debug mode for showing memory stats
     debug_mode: bool,
+    
+    // Idle monitor for auto-shutdown
+    idle_monitor: IdleMonitor,
 }
 
 impl Default for VisGrepApp {
@@ -614,6 +619,12 @@ impl VisGrepApp {
         // Load config first so we can use it for initialization
         let config = Config::load();
         let theme = config.theme;
+        
+        // Initialize idle monitor from config
+        let idle_monitor = IdleMonitor::new(
+            config.ui.auto_shutdown_minutes.unwrap_or(0),
+            config.ui.auto_shutdown_minutes.is_some()
+        );
 
         let mut tail_state = TailState::new(&config);
 
@@ -651,6 +662,7 @@ impl VisGrepApp {
             log_detector: log_parser::LogLevelDetector::new(),
             memory_monitor: MemoryMonitor::new(),
             debug_mode: false,
+            idle_monitor,
         }
     }
 
@@ -980,12 +992,24 @@ impl VisGrepApp {
 }
 
 impl eframe::App for VisGrepApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // Apply theme
         self.theme.apply(ctx);
         
         // Check memory usage periodically
         self.memory_monitor.check();
+        
+        // Track user activity for idle monitoring
+        if ctx.input(|i| i.pointer.any_down() || !i.events.is_empty()) {
+            self.idle_monitor.record_activity();
+        }
+        
+        // Check if we should auto-shutdown
+        if self.idle_monitor.should_shutdown() {
+            info!("Auto-shutdown triggered due to inactivity");
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
 
         // For tail mode, handle TextViewer navigation FIRST
         // This updates cursor_line before we process bookmark commands
@@ -1564,11 +1588,12 @@ impl VisGrepApp {
             let command = &terminal_config.command;
             let mut args = terminal_config.args.clone();
             
-            // Build the pager command
+            // Build the pager command with auto-close on exit
             let pager_cmd = if terminal_config.pager_args.is_empty() {
-                format!("{} \"{}\"", terminal_config.pager, file_path.display())
+                // Add "; exit" to close terminal when pager exits
+                format!("{} \"{}\"; exit", terminal_config.pager, file_path.display())
             } else {
-                format!("{} {} \"{}\"", 
+                format!("{} {} \"{}\"; exit", 
                     terminal_config.pager, 
                     terminal_config.pager_args.join(" "),
                     file_path.display())
@@ -1583,8 +1608,14 @@ impl VisGrepApp {
                 // macOS Terminal.app requires special handling via osascript
                 let script = format!(
                     r#"tell application "Terminal"
-                        do script "{}"
+                        set newTab to do script "{}"
                         activate
+                        delay 0.5
+                        repeat
+                            delay 0.5
+                            if not busy of newTab then exit repeat
+                        end repeat
+                        close window 1
                     end tell"#,
                     pager_cmd
                 );
@@ -1736,7 +1767,7 @@ impl VisGrepApp {
         
         #[cfg(not(target_os = "windows"))]
         {
-            let pager_cmd = format!("less -R \"{}\"", file_path.display());
+            let pager_cmd = format!("less -R \"{}\"; exit", file_path.display());
             
             // Try different terminals with their specific syntax
             let terminals = [
@@ -2618,9 +2649,15 @@ impl VisGrepApp {
                 },
             }
             
-            // Add memory info to the right side of status bar
+            // Add memory info and idle status to the right side of status bar
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(self.memory_monitor.status_string());
+                
+                let idle_status = self.idle_monitor.status_string();
+                if !idle_status.is_empty() {
+                    ui.separator();
+                    ui.label(idle_status);
+                }
             });
         });
     }

@@ -96,6 +96,10 @@ pub struct UiPreferences {
     /// Maximum number of lines to keep in tail mode buffer
     #[serde(default = "default_max_buffer_lines")]
     pub max_buffer_lines: usize,
+    
+    /// Auto-shutdown after this many minutes of inactivity (None to disable)
+    #[serde(default)]
+    pub auto_shutdown_minutes: Option<u64>,
 }
 
 fn default_font_size() -> f32 {
@@ -116,6 +120,7 @@ impl Default for UiPreferences {
             font_size: default_font_size(),
             poll_interval_ms: default_poll_interval(),
             max_buffer_lines: default_max_buffer_lines(),
+            auto_shutdown_minutes: None,
         }
     }
 }
