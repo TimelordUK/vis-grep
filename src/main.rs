@@ -1001,18 +1001,30 @@ impl eframe::App for VisGrepApp {
         
         // Track user activity for idle monitoring
         let has_activity = ctx.input(|i| {
-            // Check for any pointer activity
-            let pointer_activity = i.pointer.any_down() 
-                || i.pointer.any_click() 
-                || i.pointer.any_released()
-                || i.pointer.delta() != egui::Vec2::ZERO;
+            // Check for meaningful interaction events
+            for event in &i.events {
+                match event {
+                    // Mouse/pointer events
+                    egui::Event::PointerButton { .. } |
+                    egui::Event::PointerMoved(_) |
+                    // Keyboard events  
+                    egui::Event::Key { .. } |
+                    egui::Event::Text(_) |
+                    // Touch events
+                    egui::Event::Touch { .. } => {
+                        return true;
+                    }
+                    // Ignore these events for activity tracking
+                    egui::Event::Copy |
+                    egui::Event::Cut |
+                    egui::Event::Paste(_) => {}
+                    
+                    // Handle any other events we might not know about
+                    _ => {}
+                }
+            }
             
-            // Check for keyboard activity
-            let keyboard_activity = !i.events.is_empty() 
-                || i.keys_down.len() > 0
-                || i.modifiers != egui::Modifiers::default();
-            
-            pointer_activity || keyboard_activity
+            false
         });
         
         if has_activity {

@@ -17,8 +17,13 @@ echo ""
 
 # Check if we should enable debug logging
 if [ "$1" == "--debug" ]; then
+    # Enable debug for vis_grep only, not for winit/tracing
+    export RUST_LOG="vis_grep=debug,vis_grep::idle_monitor=debug"
+    echo "Debug logging enabled (vis_grep only)"
+elif [ "$1" == "--trace" ]; then
+    # Full debug including winit
     export RUST_LOG=debug
-    echo "Debug logging enabled"
+    echo "Full debug logging enabled (includes winit)"
 fi
 
 # Make sure we have the test config
