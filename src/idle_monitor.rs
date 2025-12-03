@@ -20,11 +20,18 @@ pub struct IdleMonitor {
 
 impl IdleMonitor {
     pub fn new(idle_timeout_minutes: u64, enabled: bool) -> Self {
+        // For testing, use shorter grace period when timeout is very short
+        let grace_period_secs = if idle_timeout_minutes <= 5 {
+            30 // 30 seconds grace for testing
+        } else {
+            300 // 5 minutes grace for normal use
+        };
+        
         Self {
             last_activity: Instant::now(),
             idle_timeout: Duration::from_secs(idle_timeout_minutes * 60),
             enabled,
-            startup_grace_period: Duration::from_secs(300), // 5 minutes grace period
+            startup_grace_period: Duration::from_secs(grace_period_secs),
             start_time: Instant::now(),
         }
     }
@@ -85,7 +92,16 @@ impl IdleMonitor {
                 }
             }
         } else {
-            "Auto-shutdown: In grace period".to_string()
+            // In grace period - show time remaining in grace period
+            let grace_elapsed = self.start_time.elapsed();
+            if grace_elapsed < self.startup_grace_period {
+                let grace_remaining = self.startup_grace_period - grace_elapsed;
+                let minutes = grace_remaining.as_secs() / 60;
+                let seconds = grace_remaining.as_secs() % 60;
+                format!("Auto-shutdown: Grace period ({}m {}s remaining)", minutes, seconds)
+            } else {
+                "Auto-shutdown: In grace period".to_string()
+            }
         }
     }
 }

@@ -1163,10 +1163,13 @@ impl eframe::App for VisGrepApp {
             },
         }
 
-        // Only request repaint when in tail mode and not paused
-        // This prevents unnecessary updates that might cause splitter issues
+        // Request repaints for different scenarios
         if self.mode == AppMode::Tail && !self.tail_state.paused_all {
+            // Normal tail mode updates
             ctx.request_repaint_after(std::time::Duration::from_millis(self.tail_state.poll_interval_ms));
+        } else if self.idle_monitor.time_until_shutdown().is_some() {
+            // Update idle monitor countdown every second when idle monitoring is active
+            ctx.request_repaint_after(std::time::Duration::from_secs(1));
         }
     }
 
