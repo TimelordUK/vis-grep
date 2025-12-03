@@ -432,6 +432,10 @@ struct TailState {
 
     // Error tracking
     file_errors: Vec<String>,
+    
+    // Rendering statistics for memory monitoring
+    last_output_rendered_lines: Option<usize>,
+    last_output_visible_lines: Option<usize>,
 }
 
 impl TailState {
@@ -466,6 +470,8 @@ impl TailState {
             bookmark_manager: BookmarkManager::new(),
             file_watch_manager: FileWatchManager::new(),
             file_errors: Vec::new(),
+            last_output_rendered_lines: None,
+            last_output_visible_lines: None,
         }
     }
 
@@ -592,6 +598,9 @@ struct VisGrepApp {
     
     // Memory monitoring
     memory_monitor: MemoryMonitor,
+    
+    // Debug mode for showing memory stats
+    debug_mode: bool,
 }
 
 impl Default for VisGrepApp {
@@ -641,6 +650,7 @@ impl VisGrepApp {
 
             log_detector: log_parser::LogLevelDetector::new(),
             memory_monitor: MemoryMonitor::new(),
+            debug_mode: false,
         }
     }
 
@@ -1097,6 +1107,24 @@ impl eframe::App for VisGrepApp {
                 },
             }
         });
+        
+        // Debug mode toggle (Ctrl+Shift+D)
+        ctx.input(|i| {
+            if i.key_pressed(egui::Key::D) && i.modifiers.ctrl && i.modifiers.shift {
+                self.debug_mode = !self.debug_mode;
+                info!("Debug mode: {}", if self.debug_mode { "ON" } else { "OFF" });
+            }
+        });
+        
+        // Render debug overlay if enabled
+        if self.debug_mode {
+            egui::Area::new("debug_overlay_area".into())
+                .interactable(false)
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    self.memory_monitor.render_debug_overlay(ui);
+                });
+        }
 
         // Mode-specific background tasks
         match self.mode {

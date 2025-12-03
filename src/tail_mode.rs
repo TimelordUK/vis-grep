@@ -719,13 +719,58 @@ impl VisGrepApp {
 
         ui.separator();
 
+        // Calculate line metrics for virtualization
+        let line_height = self.tail_state.font_size + 4.0;
+        let total_lines = self.tail_state.output_buffer.len();
+        
+        // Pre-calculate which lines are visible after filtering
+        let is_filtered = self.tail_state.tree_filter.active && 
+                         self.tail_state.tree_filter.apply_to_output;
+        
+        let visible_indices: Vec<usize> = if is_filtered || self.tail_state.log_level_filter.active {
+            self.tail_state.output_buffer.iter().enumerate()
+                .filter(|(_, log_line)| {
+                    // Check tree filter
+                    let tree_visible = if is_filtered {
+                        self.tail_state.files.iter().any(|file| {
+                            file.display_name == log_line.source_file.as_ref() &&
+                            filter::tree::is_file_visible(
+                                &self.tail_state.tree_filter,
+                                &file.path.to_string_lossy(),
+                                &file.display_name
+                            )
+                        })
+                    } else {
+                        true
+                    };
+                    
+                    // Check log level filter
+                    let level_visible = self.tail_state.log_level_filter.should_show_line(
+                        &log_line.content,
+                        &self.log_detector
+                    );
+                    
+                    tree_visible && level_visible
+                })
+                .map(|(idx, _)| idx)
+                .collect()
+        } else {
+            (0..total_lines).collect()
+        };
+        
+        let visible_count = visible_indices.len();
+        
+        // Store statistics for memory monitoring
+        self.tail_state.last_output_visible_lines = Some((ui.available_height() / line_height).ceil() as usize);
+        self.tail_state.last_output_rendered_lines = Some(visible_count.min(self.tail_state.last_output_visible_lines.unwrap_or(40)));
+        
         // Output area - use all available space
         let scroll_output = egui::ScrollArea::vertical()
             .id_salt("tail_output_scroll")
             .auto_shrink([false, false])
             .stick_to_bottom(self.tail_state.auto_scroll);
 
-        scroll_output.show(ui, |ui| {
+        scroll_output.show_rows(ui, line_height, visible_count, |ui, row_range| {
             // Add horizontal scrolling for long lines
             egui::ScrollArea::horizontal()
                 .id_salt("tail_output_h_scroll")
@@ -736,35 +781,20 @@ impl VisGrepApp {
                     let font_id = egui::FontId::new(self.tail_state.font_size, egui::FontFamily::Monospace);
                     ui.style_mut().text_styles.insert(egui::TextStyle::Monospace, font_id);
 
-                    let is_filtered = self.tail_state.tree_filter.active && 
-                                     self.tail_state.tree_filter.apply_to_output;
-                    
-                    for log_line in &self.tail_state.output_buffer {
-                        // Check if this line should be visible based on tree filter
-                        if is_filtered {
-                            // Find the file that generated this log line
-                            let should_show = self.tail_state.files.iter().any(|file| {
-                                file.display_name == log_line.source_file.as_ref() &&
-                                filter::tree::is_file_visible(
-                                    &self.tail_state.tree_filter,
-                                    &file.path.to_string_lossy(),
-                                    &file.display_name
-                                )
-                            });
-
-                            if !should_show {
-                                continue;
-                            }
+                    // Only render visible rows
+                    for row_idx in row_range {
+                        if row_idx >= visible_indices.len() {
+                            break;
                         }
-
-                        // Check if this line should be visible based on log level filter
-                        if !self.tail_state.log_level_filter.should_show_line(
-                            &log_line.content,
-                            &self.log_detector
-                        ) {
+                        
+                        let actual_idx = visible_indices[row_idx];
+                        if actual_idx >= self.tail_state.output_buffer.len() {
                             continue;
                         }
-
+                        
+                        let log_line = &self.tail_state.output_buffer[actual_idx];
+                        
+                        // No need to check filters again - we pre-filtered
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 4.0;
 
@@ -785,30 +815,8 @@ impl VisGrepApp {
                         });
                     }
 
-                    // Check if we're showing nothing due to filtering
-                    let visible_count = self.tail_state.output_buffer.iter().filter(|log_line| {
-                        // Check tree filter
-                        if is_filtered {
-                            let tree_visible = self.tail_state.files.iter().any(|file| {
-                                file.display_name == log_line.source_file.as_ref() &&
-                                filter::tree::is_file_visible(
-                                    &self.tail_state.tree_filter,
-                                    &file.path.to_string_lossy(),
-                                    &file.display_name
-                                )
-                            });
-                            if !tree_visible {
-                                return false;
-                            }
-                        }
-
-                        // Check log level filter
-                        self.tail_state.log_level_filter.should_show_line(
-                            &log_line.content,
-                            &self.log_detector
-                        )
-                    }).count();
-                    
+                    // Check if we're showing nothing due to filtering  
+                    // We already calculated visible_count above
                     if visible_count == 0 {
                         if is_filtered && !self.tail_state.output_buffer.is_empty() {
                             ui.label(
@@ -1044,7 +1052,19 @@ impl VisGrepApp {
                     &self.log_detector,
                     &color_scheme,
                 );
-                viewer.show(ui);
+                let (lines_rendered, visible_lines) = viewer.show(ui);
+                
+                // Update memory monitor with rendering statistics
+                // Include both preview buffer and output buffer in total
+                let preview_lines = self.tail_state.preview_buffer.lines.len();
+                let output_lines = self.tail_state.output_buffer.len();
+                let total_buffer_lines = preview_lines + output_lines;
+                
+                // Add the visible count from output buffer (calculated in render_tail_output)
+                let total_rendered = lines_rendered + self.tail_state.last_output_rendered_lines.unwrap_or(0);
+                let total_visible = visible_lines + self.tail_state.last_output_visible_lines.unwrap_or(0);
+                
+                self.memory_monitor.update_line_stats(total_rendered, total_visible, total_buffer_lines);
 
                 // Sync back to TailState
                 self.tail_state.preview_mode = match self.tail_state.text_viewer_state.view_mode {

@@ -1,4 +1,5 @@
 use std::time::{Duration, Instant};
+use eframe::egui;
 
 /// Memory usage information
 #[derive(Debug, Clone)]
@@ -47,6 +48,14 @@ pub struct MemoryMonitor {
     measurement_count: u64,
     /// Total memory sum for averaging
     total_memory_sum: u64,
+    
+    // Line rendering statistics
+    /// Total lines being rendered in UI
+    pub lines_rendered: usize,
+    /// Estimated visible lines in viewport
+    pub visible_lines_estimate: usize,
+    /// Total buffer size across all files
+    pub total_buffer_lines: usize,
 }
 
 impl MemoryMonitor {
@@ -60,6 +69,9 @@ impl MemoryMonitor {
             peak_memory: 0,
             measurement_count: 0,
             total_memory_sum: 0,
+            lines_rendered: 0,
+            visible_lines_estimate: 0,
+            total_buffer_lines: 0,
         }
     }
     
@@ -145,18 +157,90 @@ impl MemoryMonitor {
         }
     }
     
+    /// Get rendering efficiency percentage
+    pub fn rendering_efficiency(&self) -> f32 {
+        if self.lines_rendered > 0 {
+            (self.visible_lines_estimate as f32 / self.lines_rendered as f32) * 100.0
+        } else {
+            100.0
+        }
+    }
+    
+    /// Update line rendering statistics
+    pub fn update_line_stats(&mut self, rendered: usize, visible: usize, total_buffer: usize) {
+        self.lines_rendered = rendered;
+        self.visible_lines_estimate = visible;
+        self.total_buffer_lines = total_buffer;
+    }
+    
     /// Get formatted status string
     pub fn status_string(&self) -> String {
         if let Some(info) = &self.last_info {
+            let efficiency = self.rendering_efficiency();
+            let efficiency_str = if self.lines_rendered > 0 {
+                format!(", Eff: {:.0}%", efficiency)
+            } else {
+                String::new()
+            };
+            
             format!(
-                "Mem: {:.1}MB (△{:+.1}MB, Peak: {:.1}MB)",
+                "Mem: {:.1}MB (△{:+.1}MB, Peak: {:.1}MB{})",
                 info.physical_mb(),
                 self.growth_mb(),
-                self.peak_mb()
+                self.peak_mb(),
+                efficiency_str
             )
         } else {
             "Mem: --".to_string()
         }
+    }
+    
+    /// Create debug overlay for egui
+    pub fn render_debug_overlay(&self, ui: &mut egui::Ui) {
+        egui::Area::new("memory_debug_overlay".into())
+            .anchor(egui::Align2::RIGHT_TOP, [-10.0, 40.0])
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style())
+                    .fill(egui::Color32::from_rgba_premultiplied(0, 0, 0, 220))
+                    .show(ui, |ui| {
+                        ui.set_width(250.0);
+                        
+                        ui.colored_label(egui::Color32::YELLOW, "🔍 Memory & Rendering Stats");
+                        ui.separator();
+                        
+                        if let Some(info) = &self.last_info {
+                            ui.label(format!("Memory: {:.1} MB", info.physical_mb()));
+                            ui.label(format!("Peak: {:.1} MB", self.peak_mb()));
+                            ui.label(format!("Growth: {:+.1} MB", self.growth_mb()));
+                        }
+                        
+                        ui.separator();
+                        
+                        ui.label(format!("Buffer lines: {}", self.total_buffer_lines));
+                        ui.label(format!("Lines rendered: {}", self.lines_rendered));
+                        ui.label(format!("Visible lines: ~{}", self.visible_lines_estimate));
+                        
+                        let efficiency = self.rendering_efficiency();
+                        let color = if efficiency < 10.0 {
+                            egui::Color32::RED
+                        } else if efficiency < 50.0 {
+                            egui::Color32::YELLOW
+                        } else {
+                            egui::Color32::GREEN
+                        };
+                        
+                        ui.colored_label(color, format!("Efficiency: {:.1}%", efficiency));
+                        
+                        if self.lines_rendered > 1000 && efficiency < 10.0 {
+                            ui.separator();
+                            ui.colored_label(
+                                egui::Color32::RED, 
+                                "⚠️ Rendering many invisible lines!"
+                            );
+                            ui.label("Consider virtualization!");
+                        }
+                    });
+            });
     }
 }
 

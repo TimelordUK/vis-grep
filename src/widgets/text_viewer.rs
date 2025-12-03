@@ -100,8 +100,9 @@ impl<'a> TextViewer<'a> {
         }
     }
 
-    /// Render the text viewer widget
-    pub fn show(mut self, ui: &mut egui::Ui) {
+    /// Render the text viewer widget  
+    /// Returns (lines_rendered, estimated_visible_lines)
+    pub fn show(mut self, ui: &mut egui::Ui) -> (usize, usize) {
         // Handle filter input and update matches if filter changed
         let mut scroll_to_match = false;
         if filter::preview::render_filter_input(ui, &mut self.state.filter) {
@@ -141,10 +142,14 @@ impl<'a> TextViewer<'a> {
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
         };
 
+        // Calculate line metrics
+        let line_height = self.state.font_size + 4.0;
+        let total_rows = self.content.len();
+        
         let scroll_output = scroll_area
             .id_salt("text_viewer_scroll")
             .auto_shrink([false, false])
-            .show(ui, |ui| {
+            .show_rows(ui, line_height, total_rows, |ui, row_range| {
                 ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
 
                 // Apply custom font size
@@ -158,7 +163,13 @@ impl<'a> TextViewer<'a> {
                             .color(egui::Color32::GRAY),
                     );
                 } else {
-                    for (line_idx, line) in self.content.iter().enumerate() {
+                    // Only render the rows in the visible range
+                    for line_idx in row_range {
+                        if line_idx >= self.content.len() {
+                            break;
+                        }
+                        
+                        let line = &self.content[line_idx];
                         let is_match = self.state.filter.match_lines.contains(&line_idx);
                         let is_current = self.state.filter.current_match_line() == Some(line_idx);
                         let is_last_line = line_idx == self.content.len() - 1;
@@ -221,6 +232,11 @@ impl<'a> TextViewer<'a> {
             }
         }
 
+        // Calculate estimated visible lines based on scroll area size and font size
+        let viewport_height = scroll_output.inner_rect.height();
+        let line_height = self.state.font_size + 4.0; // Approximate line height with padding
+        let estimated_visible_lines = (viewport_height / line_height).ceil() as usize;
+        
         // Footer with controls hint
         ui.separator();
         ui.horizontal(|ui| {
@@ -246,6 +262,21 @@ impl<'a> TextViewer<'a> {
                 }
             });
         });
+        
+        // Return statistics - show_rows gives us exact counts
+        let viewport_height = scroll_output.inner_rect.height();
+        let estimated_visible_lines = (viewport_height / line_height).ceil() as usize;
+        
+        // With show_rows, egui only calls us for visible rows
+        // So the actual rendered count is based on what row_range we received
+        let lines_actually_rendered = if self.content.is_empty() {
+            0
+        } else {
+            // The number of lines we actually rendered is limited by viewport
+            estimated_visible_lines.min(total_rows)
+        };
+        
+        (lines_actually_rendered, estimated_visible_lines)
     }
 
     fn render_goto_line_input(&mut self, ui: &mut egui::Ui) {
