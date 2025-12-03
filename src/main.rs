@@ -1000,7 +1000,22 @@ impl eframe::App for VisGrepApp {
         self.memory_monitor.check();
         
         // Track user activity for idle monitoring
-        if ctx.input(|i| i.pointer.any_down() || !i.events.is_empty()) {
+        let has_activity = ctx.input(|i| {
+            // Check for any pointer activity
+            let pointer_activity = i.pointer.any_down() 
+                || i.pointer.any_click() 
+                || i.pointer.any_released()
+                || i.pointer.delta() != egui::Vec2::ZERO;
+            
+            // Check for keyboard activity
+            let keyboard_activity = !i.events.is_empty() 
+                || i.keys_down.len() > 0
+                || i.modifiers != egui::Modifiers::default();
+            
+            pointer_activity || keyboard_activity
+        });
+        
+        if has_activity {
             self.idle_monitor.record_activity();
         }
         

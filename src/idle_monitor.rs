@@ -39,6 +39,7 @@ impl IdleMonitor {
     /// Record user activity
     pub fn record_activity(&mut self) {
         self.last_activity = Instant::now();
+        log::debug!("Activity recorded, resetting idle timer");
     }
     
     /// Check if we should auto-shutdown
