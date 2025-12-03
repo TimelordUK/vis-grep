@@ -2632,8 +2632,8 @@ fn main() -> eframe::Result<()> {
     std::env::set_var("WINIT_UNIX_BACKEND", "x11");
 
     // Initialize logging
-    // Respect RUST_LOG environment variable, default to Info if not set
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+    // Respect RUST_LOG environment variable, default to warn if not set
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
         .init();
 
     // Parse command-line arguments

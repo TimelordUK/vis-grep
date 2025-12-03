@@ -6,7 +6,8 @@ export WINIT_UNIX_BACKEND=x11
 export XCURSOR_SIZE=16
 
 # Set RUST_LOG=debug for verbose logging, or RUST_LOG=info for less verbose
-export RUST_LOG="${RUST_LOG:-info}"
+# Default to warn for normal usage (only warnings and errors)
+export RUST_LOG="${RUST_LOG:-warn}"
 
 # Use debug build when RUST_LOG=debug, otherwise use release
 if [ "$RUST_LOG" = "debug" ]; then
