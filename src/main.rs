@@ -1657,12 +1657,11 @@ impl VisGrepApp {
             let command = &terminal_config.command;
             let mut args = terminal_config.args.clone();
             
-            // Build the pager command with auto-close on exit
+            // Build the pager command
             let pager_cmd = if terminal_config.pager_args.is_empty() {
-                // Add "; exit" to close terminal when pager exits
-                format!("{} \"{}\"; exit", terminal_config.pager, file_path.display())
+                format!("{} \"{}\"", terminal_config.pager, file_path.display())
             } else {
-                format!("{} {} \"{}\"; exit", 
+                format!("{} {} \"{}\"", 
                     terminal_config.pager, 
                     terminal_config.pager_args.join(" "),
                     file_path.display())
