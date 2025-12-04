@@ -1658,14 +1658,39 @@ impl VisGrepApp {
             let mut args = terminal_config.args.clone();
             
             // Build the pager command with auto-close on exit
-            let pager_cmd = if terminal_config.pager_args.is_empty() {
-                // Add "; exit" to close terminal when pager exits
-                format!("{} \"{}\"; exit", terminal_config.pager, file_path.display())
+            let pager_cmd = if cfg!(target_os = "windows") {
+                // Windows special handling
+                if terminal_config.pager == "less" {
+                    // If using less on Windows (from Git Bash or similar), we need bash to run it
+                    if terminal_config.pager_args.is_empty() {
+                        format!("bash -c \"less '{}'; read -p 'Press Enter to close...'\"", 
+                                file_path.display())
+                    } else {
+                        format!("bash -c \"less {} '{}'; read -p 'Press Enter to close...'\"", 
+                                terminal_config.pager_args.join(" "),
+                                file_path.display())
+                    }
+                } else {
+                    // Standard Windows pager (more, type, etc.)
+                    if terminal_config.pager_args.is_empty() {
+                        format!("{} \"{}\" & pause", terminal_config.pager, file_path.display())
+                    } else {
+                        format!("{} {} \"{}\" & pause", 
+                                terminal_config.pager, 
+                                terminal_config.pager_args.join(" "),
+                                file_path.display())
+                    }
+                }
             } else {
-                format!("{} {} \"{}\"; exit", 
-                    terminal_config.pager, 
-                    terminal_config.pager_args.join(" "),
-                    file_path.display())
+                // Unix: Use ; for command chaining
+                if terminal_config.pager_args.is_empty() {
+                    format!("{} \"{}\"; exit", terminal_config.pager, file_path.display())
+                } else {
+                    format!("{} {} \"{}\"; exit", 
+                            terminal_config.pager, 
+                            terminal_config.pager_args.join(" "),
+                            file_path.display())
+                }
             };
             
             info!("Terminal config found - Command: {}, Args: {:?}, Pager command: {}", 
@@ -1802,10 +1827,10 @@ impl VisGrepApp {
             // Try Windows Terminal, then PowerShell, then CMD
             let file_str = file_path.display().to_string();
             
-            // Windows Terminal
-            info!("Trying Windows Terminal with: wt -d . cmd /k more \"{}\"", file_str);
+            // Windows Terminal with proper command chaining
+            info!("Trying Windows Terminal with proper exit handling");
             if std::process::Command::new("wt")
-                .args(&["-d", ".", "cmd", "/k", &format!("more \"{}\"", file_str)])
+                .args(&["-d", ".", "cmd", "/c", &format!("more \"{}\" & pause & exit", file_str)])
                 .spawn()
                 .is_ok()
             {
