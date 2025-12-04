@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// The main layout configuration for tail mode
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,6 +63,21 @@ pub struct FileGroup {
     pub total_file_count: usize,
     #[serde(skip)]
     pub user_collapsed: Option<bool>, // Track if user manually collapsed/expanded
+}
+
+/// Runtime version of FileGroup that uses Arc to avoid cloning
+pub struct FileGroupRuntime {
+    pub id: Arc<str>,
+    pub name: Arc<str>,
+    pub icon: Option<Arc<str>>,
+    pub parent_id: Option<Arc<str>>,
+    pub collapsed: bool,
+    pub files: Arc<Vec<FileEntry>>,
+    pub groups: Arc<Vec<FileGroupRuntime>>,
+    pub has_activity: bool,
+    pub active_file_count: usize,
+    pub total_file_count: usize,
+    pub user_collapsed: Option<bool>,
 }
 
 /// An individual file entry within a group

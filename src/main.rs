@@ -27,6 +27,7 @@ mod memory_monitor;
 mod string_cache;
 mod bounded_cache;
 mod idle_monitor;
+mod memory_tracker;
 
 use config::Config;
 use input_handler::{InputHandler, NavigationCommand};
@@ -606,6 +607,10 @@ struct VisGrepApp {
     
     // Idle monitor for auto-shutdown
     idle_monitor: IdleMonitor,
+    
+    // Memory tracking
+    memory_tracker: memory_tracker::MemoryTracker,
+    frame_count: u64,
 }
 
 impl Default for VisGrepApp {
@@ -663,6 +668,8 @@ impl VisGrepApp {
             memory_monitor: MemoryMonitor::new(),
             debug_mode: false,
             idle_monitor,
+            memory_tracker: memory_tracker::MemoryTracker::new(),
+            frame_count: 0,
         }
     }
 
@@ -995,6 +1002,38 @@ impl eframe::App for VisGrepApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // Apply theme
         self.theme.apply(ctx);
+        
+        // Track frame count
+        self.frame_count += 1;
+        
+        // Collect memory stats every frame (tracker will throttle reporting)
+        if self.frame_count % 60 == 0 {  // Every second at 60fps
+            let rust_allocated = self.memory_monitor.current_allocated();
+            let os_memory = memory_tracker::get_process_memory();
+            
+            // Get egui texture and font stats
+            let texture_count = ctx.tex_manager().read().allocated().len();
+            let font_pixels = ctx.fonts(|fonts| {
+                // Count pixels in font atlas
+                let font_image = fonts.image();
+                font_image.width() * font_image.height()
+            });
+            
+            let snapshot = memory_tracker::MemorySnapshot {
+                timestamp: Instant::now(),
+                rust_allocated,
+                os_memory,
+                output_buffer_len: self.tail_state.output_buffer.len(),
+                output_buffer_capacity: self.tail_state.output_buffer.capacity(),
+                file_count: self.tail_state.files.len(),
+                active_files: self.tail_state.files.iter().filter(|f| f.is_active).count(),
+                frame_count: self.frame_count,
+                egui_textures: texture_count,
+                egui_fonts_pixels: font_pixels,
+            };
+            
+            self.memory_tracker.add_snapshot(snapshot);
+        }
         
         // Check memory usage periodically
         self.memory_monitor.check();

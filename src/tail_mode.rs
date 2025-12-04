@@ -319,18 +319,55 @@ impl VisGrepApp {
     }
     
     fn render_file_group_by_id(&mut self, ui: &mut egui::Ui, group_id: &str, depth: usize) {
-        // Get group info (cloned to avoid borrow issues)
-        let group_info = if let Some(layout) = &self.tail_state.layout {
+        // First, check if the group exists and should be rendered
+        let should_render = if let Some(layout) = &self.tail_state.layout {
+            if let Some(group) = layout.find_group(group_id) {
+                // Check visibility without cloning
+                let has_visible_files = group.files.iter().any(|entry| {
+                    if let Some(idx) = entry.tailed_file_idx {
+                        if idx < self.tail_state.files.len() {
+                            let file = &self.tail_state.files[idx];
+                            return filter::tree::is_file_visible(
+                                &self.tail_state.tree_filter,
+                                &file.path.to_string_lossy(),
+                                &file.display_name
+                            );
+                        }
+                    }
+                    false
+                });
+                
+                let has_visible_children = group.groups.iter().any(|child| {
+                    self.group_has_visible_content(&child.id)
+                });
+                
+                // Skip if nothing visible
+                if !has_visible_files && !has_visible_children && self.tail_state.tree_filter.active {
+                    false
+                } else {
+                    true
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        
+        if !should_render {
+            return;
+        }
+        
+        // Extract needed data first to avoid borrow issues
+        let group_data = if let Some(layout) = &self.tail_state.layout {
             if let Some(group) = layout.find_group(group_id) {
                 Some((
-                    group.name.clone(),
-                    group.icon.clone(),
+                    group.name.as_str(),
+                    group.icon.as_deref(),
                     group.collapsed,
                     group.has_activity,
                     group.active_file_count,
                     group.total_file_count,
-                    group.groups.iter().map(|g| g.id.clone()).collect::<Vec<_>>(),
-                    group.files.clone(),
                 ))
             } else {
                 None
@@ -339,96 +376,96 @@ impl VisGrepApp {
             None
         };
         
-        if let Some((name, icon, collapsed, has_activity, active_count, total_count, child_group_ids, files)) = group_info {
-            // Check if any files in this group are visible
-            let has_visible_files = files.iter().any(|entry| {
-                if let Some(idx) = entry.tailed_file_idx {
-                    if idx < self.tail_state.files.len() {
-                        let file = &self.tail_state.files[idx];
-                        return filter::tree::is_file_visible(
-                            &self.tail_state.tree_filter,
-                            &file.path.to_string_lossy(),
-                            &file.display_name
-                        );
-                    }
-                }
-                false
-            });
-            
-            // Check if any child groups have visible content
-            let has_visible_children = child_group_ids.iter().any(|child_id| {
-                self.group_has_visible_content(child_id)
-            });
-            
-            // Skip this group if nothing is visible
-            if !has_visible_files && !has_visible_children && self.tail_state.tree_filter.active {
-                return;
-            }
-            // Scale indent based on font size (reduced from 20.0 to be more compact)
+        if let Some((name, icon, collapsed, has_activity, active_count, total_count)) = group_data {
+            // Scale indent based on font size
             let indent = depth as f32 * (self.tail_state.font_size * 1.0);
             
-            // Scale row height with font size - more compact for smaller fonts
-            let row_height = self.tail_state.font_size * 1.2; // 20% padding scales with font
+            // Scale row height with font size
+            let row_height = self.tail_state.font_size * 1.2;
+            
+            let mut toggle_collapse = false;
+            let mut pause_clicked = false;
+            
             ui.allocate_ui_with_layout(
                 egui::Vec2::new(ui.available_width(), row_height),
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
-                ui.add_space(indent);
-                
-                // Expand/collapse arrow
-                let arrow = if collapsed { "▶" } else { "▼" };
-                if ui.small_button(arrow).clicked() {
-                    // Toggle collapsed state
-                    if let Some(layout) = &mut self.tail_state.layout {
-                        if let Some(group) = layout.find_group_mut(group_id) {
-                            group.collapsed = !group.collapsed;
-                            // Mark as user-controlled to prevent auto-expand
-                            group.user_collapsed = Some(group.collapsed);
+                    ui.add_space(indent);
+                    
+                    // Expand/collapse arrow
+                    let arrow = if collapsed { "▶" } else { "▼" };
+                    
+                    if ui.small_button(arrow).clicked() {
+                        toggle_collapse = true;
+                    }
+                    
+                    // Group icon
+                    if let Some(icon) = icon {
+                        ui.label(icon);
+                    }
+                    
+                    // Group name with activity count
+                    let label = format!("{} ({} active / {} total)", name, active_count, total_count);
+                    
+                    let color = if has_activity {
+                        egui::Color32::from_rgb(200, 255, 200)
+                    } else {
+                        ui.style().visuals.text_color()
+                    };
+                    
+                    ui.colored_label(color, label);
+                    
+                    // Group controls
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button("⏸").on_hover_text("Pause group").clicked() {
+                            pause_clicked = true;
                         }
+                    });
+                }
+            );
+            
+            // Handle actions outside the closure
+            if toggle_collapse {
+                if let Some(layout) = &mut self.tail_state.layout {
+                    if let Some(group) = layout.find_group_mut(group_id) {
+                        group.collapsed = !group.collapsed;
+                        group.user_collapsed = Some(group.collapsed);
                     }
                 }
-                
-                // Group icon
-                if let Some(icon) = &icon {
-                    ui.label(icon);
-                }
-                
-                // Group name with activity count
-                let label = format!("{} ({} active / {} total)", 
-                    name, 
-                    active_count, 
-                    total_count
-                );
-                
-                let color = if has_activity {
-                    egui::Color32::from_rgb(200, 255, 200)  // Light green
-                } else {
-                    ui.style().visuals.text_color()
-                };
-                
-                ui.colored_label(color, label);
-                
-                // Group controls
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("⏸").on_hover_text("Pause group").clicked() {
-                        self.pause_group(group_id);
-                    }
-                });
-            });
+            }
+            
+            if pause_clicked {
+                self.pause_group(group_id);
+            }
             
             // Render children if expanded
             if !collapsed {
+                // Collect child IDs and file indices
+                let (child_ids, file_indices) = if let Some(layout) = &self.tail_state.layout {
+                    if let Some(group) = layout.find_group(group_id) {
+                        let child_ids: Vec<String> = group.groups.iter().map(|g| g.id.clone()).collect();
+                        let file_indices: Vec<usize> = group.files.iter()
+                            .filter_map(|entry| {
+                                self.tail_state.files.iter()
+                                    .position(|f| f.path == entry.path)
+                            })
+                            .collect();
+                        (child_ids, file_indices)
+                    } else {
+                        (vec![], vec![])
+                    }
+                } else {
+                    (vec![], vec![])
+                };
+                
                 // Render subgroups
-                for child_id in child_group_ids {
+                for child_id in child_ids {
                     self.render_file_group_by_id(ui, &child_id, depth + 1);
                 }
                 
                 // Render files
-                for file_entry in &files {
-                    // Find the actual file index by matching path
-                    if let Some(file_idx) = self.tail_state.files.iter().position(|f| f.path == file_entry.path) {
-                        self.render_file_entry(ui, file_idx, depth + 1);
-                    }
+                for file_idx in file_indices {
+                    self.render_file_entry(ui, file_idx, depth + 1);
                 }
             }
         }
@@ -446,8 +483,7 @@ impl VisGrepApp {
             return;
         }
         
-        // Capture the file path before the closure to avoid borrowing issues
-        let file_path = file.path.clone();
+        // Track button clicks without cloning path
         let mut open_in_editor_clicked = false;
         let mut open_in_terminal_clicked = false;
         
@@ -621,15 +657,18 @@ impl VisGrepApp {
             }
         });
         
-        // Handle open in editor outside closure to avoid borrowing issues
-        if open_in_editor_clicked {
-            self.open_file_in_editor(&file_path);
+        // Handle file operations outside closure using the file index
+        if open_in_editor_clicked || open_in_terminal_clicked {
+            // Get file path again from the index
+            if let Some(file) = self.tail_state.files.get(file_idx) {
+                if open_in_editor_clicked {
+                    self.open_file_in_editor(&file.path);
+                }
+                if open_in_terminal_clicked {
+                    self.open_file_in_terminal(&file.path);
+                }
+            }
         }
-        
-        // Handle open in terminal outside closure
-        if open_in_terminal_clicked {
-            self.open_file_in_terminal(&file_path);
-        };
     }
     
     fn pause_group(&mut self, group_id: &str) {

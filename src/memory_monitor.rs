@@ -242,6 +242,16 @@ impl MemoryMonitor {
                     });
             });
     }
+    
+    /// Get current allocated memory in bytes
+    pub fn current_allocated(&self) -> usize {
+        // For now, return physical memory as a proxy for Rust allocations
+        // This isn't perfect but gives us something to track
+        self.last_info
+            .as_ref()
+            .map(|info| info.physical_memory as usize)
+            .unwrap_or(0)
+    }
 }
 
 impl Default for MemoryMonitor {
